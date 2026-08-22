@@ -93,7 +93,7 @@ internal static class ServerControllerEmitter
     private static string FormatParameter(ApiParameterModel p)
     {
         if (p.Kind == ParameterKind.CancellationToken)
-            return "global::System.Threading.CancellationToken " + p.Name;
+            return "global::System.Threading.CancellationToken " + p.Name + " = default";
 
         string binding = p.Kind switch
         {
