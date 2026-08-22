@@ -19,22 +19,19 @@ One source of truth for routes. No more duplicated URL strings that drift out of
 ## Packages
 
 ```bash
-dotnet add package FlanderDev.RouteGen.Abstractions --version 0.2.4
-dotnet add package FlanderDev.RouteGen.Generators --version 0.2.4
+dotnet add package FlanderDev.RouteGen.Abstractions
+dotnet add package FlanderDev.RouteGen.Generators
 ```
 
-`Abstractions` goes in the shared project.  
-Both packages go in the server and client projects (mark the generator with `PrivateAssets="all"`).
+`Abstractions` goes in the shared project. It's also needed directly in the client project, since the generated client implementation throws `Abstractions`' `ApiException`. `Generators` (the analyzer) goes in the server and client projects — wherever you want generated code to actually appear (mark it with `PrivateAssets="all"`, which `dotnet add package` does automatically for analyzer packages). The server's generated controller base doesn't use any `Abstractions` types itself, but referencing `Abstractions` from the server too doesn't hurt and keeps all three projects symmetric — that's what the sample does.
 
-For page-route generation, also add this to the client:
-
-```xml
-<AdditionalFiles Include="**/*.razor" />
-```
+For page-route generation, add your `.razor` files as `AdditionalFiles` to whichever project you want the generated `Paths` class to live in — see [Page routes](#page-routes) below for the recommended pattern (put it in the shared project so both server and client see the same `Paths` type).
 
 ## Define the API once
 
 ```csharp
+using FlanderDev.RouteGen.Abstractions;
+
 [ApiRoute("api/mods", HttpClientName = "App")]
 public partial interface IModsApi
 {
@@ -118,7 +115,22 @@ public static class Paths
 }
 ```
 
-Use it instead of hard-coded URLs. Override the name with `@attribute [GeneratedPathName("Whatever")]` if needed.
+Use it instead of hard-coded URLs. Override the generated member name with `@attribute [GeneratedPathName("Whatever")]` if the default (derived from the `.razor` filename) would collide with another page.
+
+`PageRouteGenerator` generates `Paths` into whichever project has the `.razor` files listed as `AdditionalFiles` — it doesn't care where those files physically live, only that they're visible to the compilation it's running in. The recommended setup, and what the sample under `samples/` uses, is to point that `AdditionalFiles` glob at the **Shared** project rather than Client:
+
+```xml
+<!-- In your Shared project's .csproj -->
+<ItemGroup>
+  <ProjectReference Include="..\..\src\FlanderDev.RouteGen.Generators\FlanderDev.RouteGen.Generators.csproj"
+                     OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+</ItemGroup>
+<ItemGroup>
+  <AdditionalFiles Include="..\YourApp.Client\**\*.razor" />
+</ItemGroup>
+```
+
+Since both Server and Client already reference Shared, they both see the single resulting `Paths` type through that one reference — useful on the server side for building email links, redirects, or sitemaps. If you instead add the `AdditionalFiles` glob separately to both Client *and* Server, you'll get two separate `Paths` classes (differently namespaced, identically shaped), which works but is redundant and easy to mix up — see `SampleApp.Shared.csproj` for the single-source version.
 
 ## Diagnostics
 

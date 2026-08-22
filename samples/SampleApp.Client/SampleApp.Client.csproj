@@ -12,11 +12,5 @@
 	</ItemGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\SampleApp.Shared\SampleApp.Shared.csproj" />
-		<ProjectReference Include="..\..\src\FlanderDev.RouteGen.Abstractions\FlanderDev.RouteGen.Abstractions.csproj" />
-		<ProjectReference Include="..\..\src\FlanderDev.RouteGen.Generators\FlanderDev.RouteGen.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
-	</ItemGroup>
-	<ItemGroup>
-		<!-- Required so PageRouteGenerator can see every @page directive and generate Paths. -->
-		<AdditionalFiles Include="**/*.razor" />
 	</ItemGroup>
 </Project>

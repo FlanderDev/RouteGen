@@ -1,6 +1,6 @@
 # FlanderDev.RouteGen.Abstractions
 
-Attributes and runtime types for [RouteGen](https://codeberg.org/FlanderDev/RouteGen).
+Attributes and runtime types for [RouteGen](https://github.com/FlanderDev/RouteGen).
 
 This package contains everything your shared project (and application code) needs to reference:
 
