@@ -1,6 +1,6 @@
 # FlanderDev.RouteGen.Generators
 
-Roslyn source generators for [RouteGen](https://codeberg.org/FlanderDev/RouteGen).
+Roslyn source generators for [RouteGen](https://github.com/FlanderDev/RouteGen).
 
 This package generates:
 
@@ -19,18 +19,20 @@ dotnet add package FlanderDev.RouteGen.Abstractions
 dotnet add package FlanderDev.RouteGen.Generators
 ```
 
-Mark the generator package with `PrivateAssets="all"`:
+Mark the generator package with `PrivateAssets="all"` (this is set automatically when you use
+`dotnet add package` on an analyzer package):
 
 ```xml
-<PackageReference Include="FlanderDev.RouteGen.Generators"
-                  Version="0.2.4"
-                  PrivateAssets="all" />
+<PackageReference Include="FlanderDev.RouteGen.Generators" PrivateAssets="all" />
 ```
 
-For page-route generation, also include your Razor files:
+For page-route generation, add your Razor files as `AdditionalFiles` to whichever project should
+get the generated `Paths` class — putting this (and the generator reference above) in your
+**shared** project, pointed at the client's `.razor` files, lets both server and client see the
+same `Paths` type:
 
 ```xml
-<AdditionalFiles Include="**/*.razor" />
+<AdditionalFiles Include="..\YourApp.Client\**\*.razor" />
 ```
 
 Define the API once in the shared project, then:
