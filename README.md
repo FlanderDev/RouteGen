@@ -117,20 +117,27 @@ public static class Paths
 
 Use it instead of hard-coded URLs. Override the generated member name with `@attribute [GeneratedPathName("Whatever")]` if the default (derived from the `.razor` filename) would collide with another page.
 
-`PageRouteGenerator` generates `Paths` into whichever project has the `.razor` files listed as `AdditionalFiles` — it doesn't care where those files physically live, only that they're visible to the compilation it's running in. The recommended setup, and what the sample under `samples/` uses, is to point that `AdditionalFiles` glob at the **Shared** project rather than Client:
+`PageRouteGenerator` generates `Paths` into whichever project has the `.razor` files listed as `AdditionalFiles` — it doesn't care where those files physically live, only that they're visible to the compilation it's running in.
+
+The recommended setup, and what the sample under `samples/` does, is to run **both** generators from the Shared project rather than from Client:
 
 ```xml
-<!-- In your Shared project's .csproj -->
+<!-- In Shared's .csproj -->
 <ItemGroup>
-  <ProjectReference Include="..\..\src\FlanderDev.RouteGen.Generators\FlanderDev.RouteGen.Generators.csproj"
-                     OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  <ProjectReference Include="..\..\src\RouteGen.Abstractions\RouteGen.Abstractions.csproj" />
+  <!-- Required at compile time: the generated HttpClient implementation's constructor takes an
+       IHttpClientFactory, and that type lives in this package, not the base framework. -->
+  <PackageReference Include="Microsoft.Extensions.Http" Version="..." />
+  <ProjectReference Include="..\..\src\RouteGen.Generators\RouteGen.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 </ItemGroup>
 <ItemGroup>
   <AdditionalFiles Include="..\YourApp.Client\**\*.razor" />
 </ItemGroup>
 ```
 
-Since both Server and Client already reference Shared, they both see the single resulting `Paths` type through that one reference — useful on the server side for building email links, redirects, or sitemaps. If you instead add the `AdditionalFiles` glob separately to both Client *and* Server, you'll get two separate `Paths` classes (differently namespaced, identically shaped), which works but is redundant and easy to mix up — see `SampleApp.Shared.csproj` for the single-source version.
+Because Shared has no `Microsoft.AspNetCore.Mvc.ControllerBase` reference, `ApiContractGenerator` takes its **client**-emission branch there, and compiles the `HttpClient` implementation directly into `Shared.dll`. Combined with `PageRouteGenerator` also running there (via the `AdditionalFiles` glob above), Shared ends up holding the interface, the client implementation, *and* `Paths` — a single, unambiguous copy of each, reachable from both Server and Client purely through the `ProjectReference` to Shared they already have. Neither Server nor Client needs `RouteGen.Generators` for these; Server only needs it for its own `ApiContractGenerator`-driven controller base, and Client doesn't need it at all.
+
+If you'd rather keep Shared a plain contracts-only library with no generator dependency, the alternative is to run `PageRouteGenerator` directly from Server instead, pointing its own `AdditionalFiles` at Client's `.razor` files. That produces a second, independent `Paths` class scoped to Server's own namespace — differently namespaced from Client's copy, identically shaped. More duplication, but zero change to Shared.
 
 ## Diagnostics
 

@@ -4,7 +4,7 @@ namespace SampleApp.Server.Services;
 
 public interface IModsService
 {
-    Task<ModListResult> GetMods(int page, int pageSize, string? search);
+    Task<ModListResult> GetMods(int page, int pageSize, string? search, SortBy sort);
     Task<ModDto?> GetMod(int id);
     Task<ModDto> Upload(ModUploadDto dto);
     Task<bool> Delete(int id);
@@ -20,11 +20,15 @@ public sealed class InMemoryModsService : IModsService
         new ModDto(3, "Extra Biomes", "carol", 452),
     ];
 
-    public Task<ModListResult> GetMods(int page, int pageSize, string? search)
+    public Task<ModListResult> GetMods(int page, int pageSize, string? search, SortBy sort)
     {
         var query = _mods.AsEnumerable();
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(m => m.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
+
+        query = sort == SortBy.Popular
+            ? query.OrderByDescending(m => m.Downloads)
+            : query.OrderByDescending(m => m.Id);
 
         var items = query.Skip((page - 1) * pageSize).Take(pageSize).ToList();
         return Task.FromResult(new ModListResult(items, _mods.Count));

@@ -9,8 +9,8 @@ namespace SampleApp.Server.Controllers;
 // (see obj/**/generated/FlanderDev.RouteGen.Generators/.../Server_IModsApi.g.cs after build).
 public sealed class ModsController(IModsService service) : ModsApiControllerBase
 {
-    public override async Task<ActionResult<ModListResult>> GetMods(int page, int pageSize, string? search)
-        => Ok(await service.GetMods(page, pageSize, search));
+    public override async Task<ActionResult<ModListResult>> GetMods(int page, int pageSize, string? search, SortBy sort)
+        => Ok(await service.GetMods(page, pageSize, search, sort));
 
     public override async Task<ActionResult<ModDto>> GetMod(int id)
         => await service.GetMod(id) is { } mod ? Ok(mod) : NotFound();

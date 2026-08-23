@@ -19,9 +19,7 @@ internal sealed class RouteTemplate(
 }
 
 /// <summary>A single literal or route-parameter part of a route template.</summary>
-internal abstract class RouteTemplatePart
-{
-}
+internal abstract class RouteTemplatePart;
 
 /// <summary>Literal text in a route template.</summary>
 internal sealed class RouteLiteralPart(string text) : RouteTemplatePart

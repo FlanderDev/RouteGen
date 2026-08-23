@@ -42,6 +42,9 @@ internal sealed class ApiMethodModel(string name, string verb, string? routeSuff
 
     /// <summary>Full name of the Task&lt;T&gt; type argument, or null when the return type is bare Task.</summary>
     public string? ResponseTypeFullName { get; set; }
+
+    public bool IsResponseNullable { get; set; }
+
     public bool IsStreamResponse { get; set; }
     public bool HasAuthorize { get; set; }
     public string? Roles { get; set; }
@@ -62,7 +65,9 @@ internal sealed class ApiParameterModel(string name, string typeFullName)
 {
     public string Name { get; } = name;
     public string TypeFullName { get; } = typeFullName;
-    public bool IsNullableOrOptional { get; set; }
+
+    public bool IsNullable { get; set; }
+
     public bool HasDefaultValue { get; set; }
     public string? DefaultValueLiteral { get; set; }
     public ParameterKind Kind { get; set; }
