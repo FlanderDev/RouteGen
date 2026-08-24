@@ -65,9 +65,52 @@ That’s the only place you write the routes.
 | `[Route("name")]` | When the parameter name ≠ route token |
 | `[Query]` | Query-string parameter |
 | `[Body]` | JSON request body (max one per method) |
+| `[Form]` | One `multipart/form-data` field (see below) |
+| `[File]` | One or more uploaded files, `multipart/form-data` (see below) |
 | `[Authorize]` / `[AllowAnonymous]` | Propagated to the generated controller |
 
 `CancellationToken` is handled automatically and never becomes part of the URL.
+
+### File uploads
+
+`[Body]` produces JSON, which can't express `IFormFile`. For file uploads, use `[Form]` for
+ordinary fields and `[File]` for the file(s) instead — RouteGen generates `multipart/form-data`
+binding/request-building for both ends from the same declaration `[Body]` gets for JSON:
+
+```csharp
+[Post("upload-with-screenshot")]
+[Authorize]
+Task<ModDto> UploadWithScreenshot(
+    [Form] string name,
+    [Form] string description,
+    [File] FormFile screenshot,
+    CancellationToken ct = default);
+
+// [File] on an IReadOnlyList<FormFile> (optionally nullable) parameter accepts several files
+// under the same field name.
+[Post("upload-with-gallery")]
+[Authorize]
+Task<ModDto> UploadWithGallery(
+    [Form] string name,
+    [Form] string description,
+    [File] IReadOnlyList<FormFile>? gallery,
+    CancellationToken ct = default);
+```
+
+- `[Form]` parameters must be simple types (same rule as `[Query]`) and become `[FromForm]`
+  server-side / a `StringContent` part client-side.
+- `[File]` parameters must be `FormFile` (single file) or `IReadOnlyList<FormFile>` — optionally
+  nullable either way — never anything else (RG0010). Server-side these become
+  `IFormFile`/`List<IFormFile>`; client-side, `FormFile` (from `RouteGen.Abstractions`) is a
+  small `record` — `FormFile(Stream Content, string FileName, string? ContentType)` — that
+  carries what a multipart file part needs to be built correctly. The caller owns the `Stream`
+  and is responsible for disposing it once the call completes, same as any other API taking a
+  caller-supplied stream.
+- `[Body]` and `[Form]`/`[File]` can't be combined on the same method — an HTTP request only has
+  one content type (RG0009).
+- There's no attribute for request size limits; that stays a hosting/infrastructure concern
+  configured on the concrete controller action, same as it would be for a hand-written multipart
+  endpoint.
 
 ## Server side
 
@@ -151,6 +194,8 @@ If you'd rather keep Shared a plain contracts-only library with no generator dep
 | RG0006 | Unsupported parameter type |
 | RG0007 | Duplicate `Paths` member name |
 | RG0008 | Unparseable route template |
+| RG0009 | `[Body]` combined with `[Form]`/`[File]` on the same method |
+| RG0010 | `[File]` parameter isn't `FormFile` or `IReadOnlyList<FormFile>` |
 
 These turn what would be runtime URL bugs into build-time errors.
 

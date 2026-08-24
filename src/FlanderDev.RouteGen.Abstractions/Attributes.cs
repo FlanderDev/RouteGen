@@ -72,6 +72,33 @@ public sealed class QueryAttribute : Attribute { }
 public sealed class BodyAttribute : Attribute { }
 
 /// <summary>
+/// Marks a scalar/simple-type parameter as one field of a <c>multipart/form-data</c> request.
+/// Combine with one or more <see cref="FileAttribute"/> parameters on the same method; a method
+/// may use <see cref="Form"/>/<see cref="FileAttribute"/> or <see cref="BodyAttribute"/>, never
+/// both -- a real HTTP request only has one content type, and RouteGen enforces that at compile
+/// time (see diagnostic RG0009).
+/// Server-side this becomes <c>[FromForm]</c>; client-side it's added to the generated
+/// <c>MultipartFormDataContent</c> as a string part.
+/// </summary>
+[AttributeUsage(AttributeTargets.Parameter, Inherited = false, AllowMultiple = false)]
+public sealed class FormAttribute : Attribute { }
+
+/// <summary>
+/// Marks a parameter as one (or, for a <c>IReadOnlyList&lt;FormFile&gt;</c>-typed parameter,
+/// several) uploaded file(s) in a <c>multipart/form-data</c> request. The parameter type must be
+/// <see cref="FormFile"/> for a single file, or <c>IReadOnlyList&lt;FormFile&gt;</c> (optionally
+/// nullable) for multiple files under the same field name -- see diagnostic RG0010 for any other
+/// type. Combine with <see cref="FormAttribute"/> parameters for accompanying form fields; not
+/// combinable with <see cref="BodyAttribute"/> on the same method (RG0009).
+/// Server-side a single file becomes <c>[FromForm] IFormFile</c>, and multiple files become
+/// <c>[FromForm] List&lt;IFormFile&gt;</c>. Client-side, the generated implementation adds each
+/// file's <see cref="FormFile.Content"/> stream to the request as a file part under the same
+/// field name, using <see cref="FormFile.FileName"/> and <see cref="FormFile.ContentType"/>.
+/// </summary>
+[AttributeUsage(AttributeTargets.Parameter, Inherited = false, AllowMultiple = false)]
+public sealed class FileAttribute : Attribute { }
+
+/// <summary>
 /// Explicit override escape hatch: binds a parameter to a specific route-template token name
 /// when it differs from the parameter's own name (route parameters are inferred by name-matching by default).
 /// </summary>

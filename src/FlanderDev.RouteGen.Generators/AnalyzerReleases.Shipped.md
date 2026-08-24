@@ -12,3 +12,5 @@ RG0005 | More than one [Body] parameter | RouteGen
 RG0006 | Type is not convertible to/from a URL segment or query string | RouteGen
 RG0007 | Ambiguous generated Paths member name | RouteGen
 RG0008 | Invalid or unparsable route template | RouteGen
+RG0009 | [Body] combined with [Form]/[File] on the same method | RouteGen
+RG0010 | [File] parameter has an unsupported type | RouteGen

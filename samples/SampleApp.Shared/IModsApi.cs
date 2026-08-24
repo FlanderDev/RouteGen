@@ -21,6 +21,27 @@ public partial interface IModsApi
     [Authorize]
     Task<ModDto> Upload([Body] ModUploadDto dto);
 
+    // [Form]/[File] demonstrate multipart/form-data: ordinary form fields alongside a single
+    // required file. Not combinable with [Body] on the same method (a request has one content
+    // type) -- see RG0009.
+    [Post("upload-with-screenshot")]
+    [Authorize]
+    Task<ModDto> UploadWithScreenshot(
+        [Form] string name,
+        [Form] string description,
+        [File] FormFile screenshot,
+        CancellationToken ct = default);
+
+    // [File] on an IReadOnlyList<FormFile>? parameter is the multi-file form: several files
+    // under the same field name, here optional (the mod can be uploaded without a gallery).
+    [Post("upload-with-gallery")]
+    [Authorize]
+    Task<ModDto> UploadWithGallery(
+        [Form] string name,
+        [Form] string description,
+        [File] IReadOnlyList<FormFile>? gallery,
+        CancellationToken ct = default);
+
     [Delete("{id:int}")]
     [Authorize(Roles = "Admin")]
     Task Delete(int id, CancellationToken ct = default);
