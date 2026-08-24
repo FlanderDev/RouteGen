@@ -14,7 +14,8 @@ internal static class ApiInterfaceReader
 {
     private static readonly SymbolDisplayFormat FullyQualified =
         SymbolDisplayFormat.FullyQualifiedFormat.WithMiscellaneousOptions(
-            SymbolDisplayMiscellaneousOptions.UseSpecialTypes);
+            SymbolDisplayMiscellaneousOptions.UseSpecialTypes |
+            SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
     private static readonly HashSet<SpecialType> SimpleSpecialTypes =
     [
@@ -134,6 +135,7 @@ internal static class ApiInterfaceReader
             {
                 var arg = taskType.TypeArguments[0];
                 methodModel.ResponseTypeFullName = arg.ToDisplayString(FullyQualified);
+                methodModel.IsResponseNullable = IsNullableType(arg, null);
                 methodModel.IsStreamResponse = arg.Name == "Stream";
             }
             else
@@ -160,8 +162,7 @@ internal static class ApiInterfaceReader
                 param.Name,
                 paramType.ToDisplayString(FullyQualified))
             {
-                IsNullableOrOptional = param.HasExplicitDefaultValue ||
-                                       paramType.NullableAnnotation == NullableAnnotation.Annotated,
+                IsNullable = IsNullableType(paramType, param),
                 HasDefaultValue = param.HasExplicitDefaultValue,
                 DefaultValueLiteral = param.HasExplicitDefaultValue ? FormatDefault(param) : null,
             };
@@ -264,6 +265,20 @@ internal static class ApiInterfaceReader
         return methodModel;
     }
 
+    private static bool IsNullableType(ITypeSymbol type, IParameterSymbol? param)
+    {
+        if (type.NullableAnnotation == NullableAnnotation.Annotated)
+            return true;
+
+        if (type is INamedTypeSymbol { Name: "Nullable", IsGenericType: true })
+            return true;
+
+        if (param is not null && param.HasExplicitDefaultValue && param.ExplicitDefaultValue is null)
+            return true;
+
+        return false;
+    }
+
     private static void CheckSimpleType(
         ITypeSymbol type,
         IParameterSymbol param,
@@ -351,10 +366,31 @@ internal static class ApiInterfaceReader
         if (!param.HasExplicitDefaultValue) return null;
 
         var value = param.ExplicitDefaultValue;
-        if (value is null) return "default";
-        if (value is string s) return "\"" + s.Replace("\"", "\\\"") + "\"";
+        if (value is null) return "default"; // for reference types AND Nullable<T>
+
+
+        // Get underlying type for nullable parameters, so enum defaults are handled correctly.
+        var underlyingType = param.Type is INamedTypeSymbol { Name: "Nullable", IsGenericType: true } n
+            ? n.TypeArguments[0]
+            : param.Type;
+
+        if (underlyingType.TypeKind == TypeKind.Enum)
+        {
+            // An enum cannot (implicitly) be assinged an integer literal as its default (excpet 0... don't ask).
+            // Prefer the matching enum member when there is one, and otherwise emit an explicit cast.
+            // The cast also handles values such as combined [Flags] values that have no named member.
+            var enumType = (INamedTypeSymbol)underlyingType;
+            var matchingMember = enumType.GetMembers().OfType<IFieldSymbol>()
+                .FirstOrDefault(f => f.HasConstantValue && Equals(f.ConstantValue, value));
+            string enumTypeName = underlyingType.ToDisplayString(FullyQualified);
+            return matchingMember is not null
+                ? $"{enumTypeName}.{matchingMember.Name}"
+                : $"({enumTypeName}){value}";
+        }
+
+        if (value is string s) return $"\"{s.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"";
         if (value is bool b) return b ? "true" : "false";
-        if (value is char c) return "'" + c + "'";
+        if (value is char c) return $"'{c}'";
         return value.ToString();
     }
 

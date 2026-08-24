@@ -8,7 +8,11 @@ namespace SampleApp.Shared;
 public partial interface IModsApi
 {
     [Get]
-    Task<ModListResult> GetMods([Query] int page = 1, [Query] int pageSize = 18, [Query] string? search = null);
+    Task<ModListResult> GetMods(
+        [Query] int page = 1,
+        [Query] int pageSize = 18,
+        [Query] string? search = null,
+        [Query] SortBy sort = SortBy.Newest);
 
     [Get("{id:int}")]
     Task<ModDto> GetMod(int id);
@@ -20,6 +24,12 @@ public partial interface IModsApi
     [Delete("{id:int}")]
     [Authorize(Roles = "Admin")]
     Task Delete(int id, CancellationToken ct = default);
+}
+
+public enum SortBy
+{
+    Popular = 0,
+    Newest = 1,
 }
 
 public sealed record ModDto(int Id, string Name, string Author, int Downloads);

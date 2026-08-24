@@ -78,17 +78,14 @@ internal static class ClientImplementationEmitter
 
             foreach (var q in queryParams)
             {
-                if (q.TypeFullName.EndsWith("?"))
+                if (q.IsNullable)
                 {
-                    bool isNullableString = q.TypeFullName == "string?";
-                    string valueExpr = isNullableString ? q.Name : q.Name + ".Value.ToString()";
-
                     sb.Append(bodyIndent).Append("if (").Append(q.Name).AppendLine(" is not null)");
                     sb.Append(bodyIndent).Append("    __query.Add($\"")
                       .Append(q.Name)
                       .Append("={Uri.EscapeDataString(")
-                      .Append(valueExpr)
-                      .AppendLine(" ?? string.Empty)}\");");
+                      .Append(q.Name)
+                      .AppendLine("!.ToString()!)}\");");
                 }
                 else
                 {
@@ -154,7 +151,8 @@ internal static class ClientImplementationEmitter
               .Append(method.ResponseTypeFullName)
               .Append(">(cancellationToken: ")
               .Append(ctArg)
-              .AppendLine("))!;");
+              .Append("))");
+            sb.AppendLine(method.IsResponseNullable ? ";" : "!;");
         }
 
         sb.Append(indent).AppendLine("}");
@@ -192,9 +190,13 @@ internal static class ClientImplementationEmitter
 
             if (param is not null)
             {
+                string accessor = param.IsNullable
+                    ? param.Name + "?.ToString() ?? string.Empty"
+                    : param.Name + ".ToString() ?? string.Empty";
+
                 sb.Append("\" + Uri.EscapeDataString(")
-                  .Append(param.Name)
-                  .Append(".ToString() ?? string.Empty) + \"");
+                  .Append(accessor)
+                  .Append(") + \"");
             }
             else
             {
