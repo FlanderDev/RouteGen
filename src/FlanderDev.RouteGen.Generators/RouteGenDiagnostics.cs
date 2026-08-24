@@ -77,4 +77,22 @@ internal static class RouteGenDiagnostics
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "The route template could not be parsed into literal segments and {token} placeholders.");
+
+    public static readonly DiagnosticDescriptor MixedBodyAndMultipart = new(
+        id: "RG0009",
+        title: "[Body] combined with [Form]/[File] on the same method",
+        messageFormat: "Method '{0}' has both a [Body] parameter and a [Form]/[File] parameter; a request can only have one content type -- pick JSON ([Body]) or multipart/form-data ([Form]/[File]), not both",
+        category: Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A single HTTP request has exactly one Content-Type, so a method cannot mix a JSON [Body] parameter with [Form]/[File] multipart parameters.");
+
+    public static readonly DiagnosticDescriptor InvalidFileParameterType = new(
+        id: "RG0010",
+        title: "[File] parameter has an unsupported type",
+        messageFormat: "Parameter '{0}' on method '{1}' is marked [File] but has type '{2}'; [File] parameters must be FormFile (single file) or IReadOnlyList<FormFile> (optionally nullable, for multiple files)",
+        category: Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "[File] binds to a multipart file part; the parameter type must be able to represent one uploaded file (FormFile) or several under the same field name (IReadOnlyList<FormFile>).");
 }

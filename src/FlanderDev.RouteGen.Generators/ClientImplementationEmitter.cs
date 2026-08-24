@@ -109,7 +109,25 @@ internal static class ClientImplementationEmitter
         var bodyParam = method.Parameters.FirstOrDefault(
             p => p.Kind == ParameterKind.Body);
 
-        string httpCall = method.Verb switch
+        string httpCall;
+
+        if (method.UsesMultipart)
+        {
+            EmitMultipartContentBuilding(sb, bodyIndent, method);
+
+            httpCall = method.Verb switch
+            {
+                "PUT" => $"_http.PutAsync(__url.ToString(), __content, {ctArg})",
+                "PATCH" => $"_http.PatchAsync(__url.ToString(), __content, {ctArg})",
+                // POST is by far the common case for uploads; also the fallback for GET/DELETE,
+                // which aren't blocked from using [Form]/[File] but are unusual enough not to
+                // warrant their own diagnostic the way [Body] on GET/DELETE gets one (RG0002).
+                _ => $"_http.PostAsync(__url.ToString(), __content, {ctArg})"
+            };
+        }
+        else
+        {
+            httpCall = method.Verb switch
         {
             "GET" => "_http.GetAsync(__url.ToString(), " + ctArg + ")",
             "DELETE" => "_http.DeleteAsync(__url.ToString(), " + ctArg + ")",
@@ -124,6 +142,7 @@ internal static class ClientImplementationEmitter
                 : $"_http.PatchAsync(__url.ToString(), null, {ctArg})",
             _ => "_http.GetAsync(__url.ToString(), " + ctArg + ")"
         };
+        }
 
         sb.Append(bodyIndent).Append("var __response = await ").Append(httpCall).AppendLine(";");
         sb.Append(bodyIndent).AppendLine("if (!__response.IsSuccessStatusCode)");
@@ -157,6 +176,91 @@ internal static class ClientImplementationEmitter
 
         sb.Append(indent).AppendLine("}");
         sb.AppendLine();
+    }
+
+    private static void EmitMultipartContentBuilding(StringBuilder sb, string bodyIndent, ApiMethodModel method)
+    {
+        sb.Append(bodyIndent).AppendLine("var __content = new MultipartFormDataContent();");
+
+        foreach (var p in method.Parameters.Where(p => p.Kind == ParameterKind.Form))
+        {
+            if (p.IsNullable)
+            {
+                sb.Append(bodyIndent).Append("if (").Append(p.Name).AppendLine(" is not null)");
+                sb.Append(bodyIndent).Append("    __content.Add(new StringContent(")
+                  .Append(p.Name).Append("!.ToString()!), \"").Append(p.Name).AppendLine("\");");
+            }
+            else
+            {
+                sb.Append(bodyIndent).Append("__content.Add(new StringContent(")
+                  .Append(p.Name).Append(".ToString() ?? string.Empty), \"").Append(p.Name).AppendLine("\");");
+            }
+        }
+
+        foreach (var p in method.Parameters.Where(p => p.Kind == ParameterKind.File))
+        {
+            if (p.IsMultiFile)
+                EmitMultiFilePart(sb, bodyIndent, p);
+            else
+                EmitSingleFilePart(sb, bodyIndent, p);
+        }
+    }
+
+    private static void EmitSingleFilePart(StringBuilder sb, string bodyIndent, ApiParameterModel p)
+    {
+        string indent = bodyIndent;
+        string nullBang = p.IsNullable ? "!" : "";
+
+        if (p.IsNullable)
+        {
+            sb.Append(bodyIndent).Append("if (").Append(p.Name).AppendLine(" is not null)");
+            sb.Append(bodyIndent).AppendLine("{");
+            indent = bodyIndent + "    ";
+        }
+
+        string partVar = "__part_" + p.Name;
+        sb.Append(indent).Append("var ").Append(partVar).Append(" = new StreamContent(")
+          .Append(p.Name).Append(nullBang).AppendLine(".Content);");
+        sb.Append(indent).Append("if (").Append(p.Name).Append(nullBang).AppendLine(".ContentType is not null)");
+        sb.Append(indent).Append("    ").Append(partVar)
+          .Append(".Headers.ContentType = new global::System.Net.Http.Headers.MediaTypeHeaderValue(")
+          .Append(p.Name).Append(nullBang).AppendLine(".ContentType);");
+        sb.Append(indent).Append("__content.Add(").Append(partVar).Append(", \"").Append(p.Name)
+          .Append("\", ").Append(p.Name).Append(nullBang).AppendLine(".FileName);");
+
+        if (p.IsNullable)
+            sb.Append(bodyIndent).AppendLine("}");
+    }
+
+    private static void EmitMultiFilePart(StringBuilder sb, string bodyIndent, ApiParameterModel p)
+    {
+        string indent = bodyIndent;
+
+        if (p.IsNullable)
+        {
+            sb.Append(bodyIndent).Append("if (").Append(p.Name).AppendLine(" is not null)");
+            sb.Append(bodyIndent).AppendLine("{");
+            indent = bodyIndent + "    ";
+        }
+
+        string loopVar = "__file_" + p.Name;
+        string partVar = "__part_" + p.Name;
+
+        sb.Append(indent).Append("foreach (var ").Append(loopVar).Append(" in ").Append(p.Name).AppendLine(")");
+        sb.Append(indent).AppendLine("{");
+        string loopIndent = indent + "    ";
+        sb.Append(loopIndent).Append("var ").Append(partVar).Append(" = new StreamContent(")
+          .Append(loopVar).AppendLine(".Content);");
+        sb.Append(loopIndent).Append("if (").Append(loopVar).AppendLine(".ContentType is not null)");
+        sb.Append(loopIndent).Append("    ").Append(partVar)
+          .Append(".Headers.ContentType = new global::System.Net.Http.Headers.MediaTypeHeaderValue(")
+          .Append(loopVar).AppendLine(".ContentType);");
+        sb.Append(loopIndent).Append("__content.Add(").Append(partVar).Append(", \"").Append(p.Name)
+          .Append("\", ").Append(loopVar).AppendLine(".FileName);");
+        sb.Append(indent).AppendLine("}");
+
+        if (p.IsNullable)
+            sb.Append(bodyIndent).AppendLine("}");
     }
 
     private static string BuildInterpolatedTemplateLiteral(

@@ -180,6 +180,12 @@ internal static class ApiInterfaceReader
             bool isBody = param.GetAttributes()
                 .Any(a => IsAttribute(a.AttributeClass, nameof(BodyAttribute)));
 
+            bool isForm = param.GetAttributes()
+                .Any(a => IsAttribute(a.AttributeClass, nameof(FormAttribute)));
+
+            bool isFile = param.GetAttributes()
+                .Any(a => IsAttribute(a.AttributeClass, nameof(FileAttribute)));
+
             var routeOverride = param.GetAttributes()
                 .FirstOrDefault(a => IsAttribute(a.AttributeClass, nameof(RouteAttribute)));
 
@@ -218,6 +224,29 @@ internal static class ApiInterfaceReader
             else if (isQuery)
             {
                 paramModel.Kind = ParameterKind.Query;
+                CheckSimpleType(paramType, param, method, diagnostics);
+            }
+            else if (isFile)
+            {
+                paramModel.Kind = ParameterKind.File;
+
+                if (TryGetFileParameterShape(paramType, out bool isMultiFile))
+                {
+                    paramModel.IsMultiFile = isMultiFile;
+                }
+                else
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        RouteGenDiagnostics.InvalidFileParameterType,
+                        GetLocation(param),
+                        param.Name,
+                        method.Name,
+                        paramType.ToDisplayString()));
+                }
+            }
+            else if (isForm)
+            {
+                paramModel.Kind = ParameterKind.Form;
                 CheckSimpleType(paramType, param, method, diagnostics);
             }
             else if (matches)
@@ -262,8 +291,53 @@ internal static class ApiInterfaceReader
             }
         }
 
+        if (methodModel.Parameters.Any(p => p.Kind == ParameterKind.Body) &&
+            methodModel.Parameters.Any(p => p.Kind is ParameterKind.Form or ParameterKind.File))
+        {
+            diagnostics.Add(Diagnostic.Create(
+                RouteGenDiagnostics.MixedBodyAndMultipart,
+                GetLocation(method),
+                method.Name));
+        }
+
         return methodModel;
     }
+
+    /// <summary>
+    /// Determines whether a type is a valid <see cref="FileAttribute"/> parameter type: either a
+    /// single <c>FormFile</c>, or a list-like collection of them (<c>IReadOnlyList&lt;FormFile&gt;</c>,
+    /// <c>IEnumerable&lt;FormFile&gt;</c>, <c>IList&lt;FormFile&gt;</c>, <c>List&lt;FormFile&gt;</c>,
+    /// <c>ICollection&lt;FormFile&gt;</c>, or <c>FormFile[]</c>), optionally nullable either way
+    /// (nullability itself is tracked separately via <see cref="IsNullableType"/>).
+    /// </summary>
+    private static bool TryGetFileParameterShape(ITypeSymbol type, out bool isMultiFile)
+    {
+        isMultiFile = false;
+
+        if (IsFormFileType(type))
+            return true;
+
+        if (type is IArrayTypeSymbol arrayType && IsFormFileType(arrayType.ElementType))
+        {
+            isMultiFile = true;
+            return true;
+        }
+
+        if (type is INamedTypeSymbol { IsGenericType: true } named &&
+            named.TypeArguments.Length == 1 &&
+            IsFormFileType(named.TypeArguments[0]) &&
+            named.Name is "IReadOnlyList" or "IEnumerable" or "IList" or "List"
+                or "ICollection" or "IReadOnlyCollection")
+        {
+            isMultiFile = true;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsFormFileType(ITypeSymbol type) =>
+        type is INamedTypeSymbol { Name: "FormFile" };
 
     private static bool IsNullableType(ITypeSymbol type, IParameterSymbol? param)
     {

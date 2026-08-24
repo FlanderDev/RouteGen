@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 
 namespace FlanderDev.RouteGen.Generators;
 
@@ -51,6 +52,15 @@ internal sealed class ApiMethodModel(string name, string verb, string? routeSuff
     public string? Policy { get; set; }
     public bool AllowAnonymous { get; set; }
     public List<ApiParameterModel> Parameters { get; } = [];
+
+    /// <summary>
+    /// True when this method has one or more <see cref="ParameterKind.Form"/>/
+    /// <see cref="ParameterKind.File"/> parameters, meaning both emitters must produce
+    /// <c>multipart/form-data</c> binding/request-building instead of the JSON path used for
+    /// <see cref="ParameterKind.Body"/>. Mutually exclusive with a <c>[Body]</c> parameter --
+    /// enforced as diagnostic RG0009, since an HTTP request can only have one content type.
+    /// </summary>
+    public bool UsesMultipart => Parameters.Any(p => p.Kind is ParameterKind.Form or ParameterKind.File);
 }
 
 internal enum ParameterKind
@@ -58,6 +68,8 @@ internal enum ParameterKind
     RouteOrAuto,
     Query,
     Body,
+    Form,
+    File,
     CancellationToken
 }
 
@@ -74,4 +86,11 @@ internal sealed class ApiParameterModel(string name, string typeFullName)
     public string? RouteTokenNameOverride { get; set; }
     public bool MatchesRouteToken { get; set; }
     public string? RouteConstraint { get; set; }
+
+    /// <summary>
+    /// True when a <see cref="ParameterKind.File"/> parameter is the multi-file form
+    /// (<c>IReadOnlyList&lt;FormFile&gt;</c>, optionally nullable) rather than a single
+    /// <c>FormFile</c>. Unused for every other <see cref="ParameterKind"/>.
+    /// </summary>
+    public bool IsMultiFile { get; set; }
 }

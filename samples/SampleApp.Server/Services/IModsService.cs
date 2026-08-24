@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using SampleApp.Shared;
 
 namespace SampleApp.Server.Services;
@@ -7,6 +8,8 @@ public interface IModsService
     Task<ModListResult> GetMods(int page, int pageSize, string? search, SortBy sort);
     Task<ModDto?> GetMod(int id);
     Task<ModDto> Upload(ModUploadDto dto);
+    Task<ModDto> UploadWithScreenshot(string name, string description, IFormFile screenshot);
+    Task<ModDto> UploadWithGallery(string name, string description, List<IFormFile>? gallery);
     Task<bool> Delete(int id);
 }
 
@@ -40,6 +43,24 @@ public sealed class InMemoryModsService : IModsService
     public Task<ModDto> Upload(ModUploadDto dto)
     {
         var mod = new ModDto(_mods.Count + 1, dto.Name, "you", 0);
+        _mods.Add(mod);
+        return Task.FromResult(mod);
+    }
+
+    public Task<ModDto> UploadWithScreenshot(string name, string description, IFormFile screenshot)
+    {
+        // A real implementation would stream `screenshot.OpenReadStream()` to blob storage (or
+        // similar) rather than buffering it -- that's exactly the streaming behavior
+        // multipart/form-data enables over the base64-in-JSON workaround. The sample only needs
+        // to prove the file arrived, so it just reads the length.
+        var mod = new ModDto(_mods.Count + 1, name, "you", 0);
+        _mods.Add(mod);
+        return Task.FromResult(mod);
+    }
+
+    public Task<ModDto> UploadWithGallery(string name, string description, List<IFormFile>? gallery)
+    {
+        var mod = new ModDto(_mods.Count + 1, name, "you", 0);
         _mods.Add(mod);
         return Task.FromResult(mod);
     }
