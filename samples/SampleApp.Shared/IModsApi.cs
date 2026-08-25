@@ -28,8 +28,8 @@ public partial interface IModsApi
     [Authorize]
     Task<ModDto> UploadWithScreenshot(
         [Form] string name,
-        [Form] string description,
-        [File] FormFile screenshot,
+        [Form] FileInfo fileInfo,
+        [File] FormFile formFile,
         CancellationToken ct = default);
 
     // [File] on an IReadOnlyList<FormFile>? parameter is the multi-file form: several files
@@ -37,9 +37,9 @@ public partial interface IModsApi
     [Post("upload-with-gallery")]
     [Authorize]
     Task<ModDto> UploadWithGallery(
-        [Form] string name,
-        [Form] string description,
-        [File] IReadOnlyList<FormFile>? gallery,
+        [Form] List<string> names,
+        [Form] List<FileInfo> fileInfos,
+        [File] List<FormFile> formFiles,
         CancellationToken ct = default);
 
     [Delete("{id:int}")]

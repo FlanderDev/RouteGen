@@ -56,7 +56,7 @@ internal static class RouteGenDiagnostics
         title: "Type is not convertible to/from a URL segment or query string",
         messageFormat: "Parameter '{0}' on method '{1}' has type '{2}', which is not a primitive, string, enum, Guid, DateTime, or similar simple type expected for a route/query parameter",
         category: Category,
-        DiagnosticSeverity.Error,
+        DiagnosticSeverity.Hidden,
         isEnabledByDefault: true,
         description: "Route and query parameters must be simple, URL-representable types. Use [Body] for complex object types.");
 
