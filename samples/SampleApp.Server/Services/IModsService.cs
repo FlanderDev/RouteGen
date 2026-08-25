@@ -8,8 +8,8 @@ public interface IModsService
     Task<ModListResult> GetMods(int page, int pageSize, string? search, SortBy sort);
     Task<ModDto?> GetMod(int id);
     Task<ModDto> Upload(ModUploadDto dto);
-    Task<ModDto> UploadWithScreenshot(string name, string description, IFormFile screenshot);
-    Task<ModDto> UploadWithGallery(string name, string description, List<IFormFile>? gallery);
+    Task<ModDto> UploadWithScreenshot(string name, FileInfo FormFile, IFormFile screenshot);
+    Task<List<ModDto>> UploadWithGallery(List<string> names, List<FileInfo> fileInfos, List<IFormFile> gallery);
     Task<bool> Delete(int id);
 }
 
@@ -47,7 +47,7 @@ public sealed class InMemoryModsService : IModsService
         return Task.FromResult(mod);
     }
 
-    public Task<ModDto> UploadWithScreenshot(string name, string description, IFormFile screenshot)
+    public Task<ModDto> UploadWithScreenshot(string name, FileInfo FormFile, IFormFile screenshot)
     {
         // A real implementation would stream `screenshot.OpenReadStream()` to blob storage (or
         // similar) rather than buffering it -- that's exactly the streaming behavior
@@ -58,11 +58,11 @@ public sealed class InMemoryModsService : IModsService
         return Task.FromResult(mod);
     }
 
-    public Task<ModDto> UploadWithGallery(string name, string description, List<IFormFile>? gallery)
+    public Task<List<ModDto>> UploadWithGallery(List<string> names, List<FileInfo> fileInfos, List<IFormFile> gallery)
     {
-        var mod = new ModDto(_mods.Count + 1, name, "you", 0);
-        _mods.Add(mod);
-        return Task.FromResult(mod);
+        var images = gallery.Select((s, i) => new ModDto(_mods.Count + i + 1, names[i], "you", 0)).ToList();
+        _mods.AddRange(images);
+        return Task.FromResult(_mods);
     }
 
     public Task<bool> Delete(int id)
