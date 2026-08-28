@@ -4,7 +4,7 @@
 		<LangVersion>latest</LangVersion>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
-		<Version>0.5.1</Version>
+		<Version>0.5.2</Version>
 		<Authors>FlanderDev</Authors>
 		<Description>Attributes and runtime support types (ApiException, HTTP verb attributes, ApiRoute, Query/Body/Route markers) for RouteGen, a Roslyn source generator that keeps Blazor WebAssembly client calls and ASP.NET Core MVC controller routes generated from a single shared interface.</Description>
 		<PackageTags>roslyn;source-generator;blazor;aspnetcore;routing;codegen</PackageTags>
