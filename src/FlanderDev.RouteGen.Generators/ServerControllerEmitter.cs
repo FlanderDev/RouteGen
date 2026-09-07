@@ -3,8 +3,10 @@ using System.Text;
 
 namespace FlanderDev.RouteGen.Generators;
 
+/// <summary>Emits the abstract MVC controller base class for a parsed <see cref="ApiInterfaceModel"/>.</summary>
 internal static class ServerControllerEmitter
 {
+    /// <summary>Renders the full generated source (including <c>#nullable enable</c>, usings, and namespace) for <paramref name="model"/>'s abstract controller base.</summary>
     public static string Emit(ApiInterfaceModel model)
     {
         var sb = new StringBuilder();
@@ -14,6 +16,7 @@ internal static class ServerControllerEmitter
         sb.AppendLine("using Microsoft.AspNetCore.Authorization;");
         sb.AppendLine("using Microsoft.AspNetCore.Http;");
         sb.AppendLine("using Microsoft.AspNetCore.Mvc;");
+        sb.AppendLine("using Microsoft.AspNetCore.Mvc.ModelBinding;");
         sb.AppendLine();
 
         bool hasNamespace = !string.IsNullOrEmpty(model.Namespace);
@@ -33,6 +36,12 @@ internal static class ServerControllerEmitter
         sb.Append(indent).Append("public abstract class ").Append(className).AppendLine(" : ControllerBase");
         sb.Append(indent).AppendLine("{");
 
+        bool needsJsonFormBinder = model.Methods.Any(m =>
+            m.Parameters.Any(p => p.Kind == ParameterKind.Form && !p.IsSimpleType));
+
+        if (needsJsonFormBinder)
+            EmitJsonFormFieldBinder(sb, indent + "    ");
+
         foreach (var method in model.Methods)
         {
             EmitControllerMethod(sb, indent + "    ", method);
@@ -45,6 +54,48 @@ internal static class ServerControllerEmitter
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Emits a nested <see cref="IModelBinder"/> that reads a raw <c>multipart/form-data</c>
+    /// field and JSON-deserializes it into the target parameter type. Used for <c>[Form]</c>
+    /// parameters whose type isn't simple (<see cref="ApiParameterModel.IsSimpleType"/> false),
+    /// which -- unlike a plain <c>[FromForm]</c> simple-type field -- have no meaningful
+    /// per-property multipart binding without one. Nested inside the controller base (rather
+    /// than a single shared type) purely so multiple generated controllers never collide on the
+    /// name; reads directly from <c>Request.Form</c> rather than the composite value provider so
+    /// it can never accidentally bind from the route or query string instead.
+    /// </summary>
+    private static void EmitJsonFormFieldBinder(StringBuilder sb, string indent)
+    {
+        sb.Append(indent).AppendLine("private sealed class JsonFormFieldBinder : IModelBinder");
+        sb.Append(indent).AppendLine("{");
+        sb.Append(indent).AppendLine("    public System.Threading.Tasks.Task BindModelAsync(ModelBindingContext bindingContext)");
+        sb.Append(indent).AppendLine("    {");
+        sb.Append(indent).AppendLine("        string? raw = bindingContext.HttpContext.Request.Form.TryGetValue(bindingContext.FieldName, out var values) ? values.ToString() : null;");
+        sb.Append(indent).AppendLine();
+        sb.Append(indent).AppendLine("        if (string.IsNullOrEmpty(raw))");
+        sb.Append(indent).AppendLine("        {");
+        sb.Append(indent).AppendLine("            bindingContext.Result = ModelBindingResult.Success(null);");
+        sb.Append(indent).AppendLine("            return System.Threading.Tasks.Task.CompletedTask;");
+        sb.Append(indent).AppendLine("        }");
+        sb.Append(indent).AppendLine();
+        sb.Append(indent).AppendLine("        try");
+        sb.Append(indent).AppendLine("        {");
+        sb.Append(indent).AppendLine("            var model = System.Text.Json.JsonSerializer.Deserialize(raw, bindingContext.ModelType);");
+        sb.Append(indent).AppendLine("            bindingContext.Result = ModelBindingResult.Success(model);");
+        sb.Append(indent).AppendLine("        }");
+        sb.Append(indent).AppendLine("        catch (System.Text.Json.JsonException ex)");
+        sb.Append(indent).AppendLine("        {");
+        sb.Append(indent).AppendLine("            bindingContext.ModelState.TryAddModelError(bindingContext.ModelName, $\"Invalid JSON for form field '{bindingContext.FieldName}': {ex.Message}\");");
+        sb.Append(indent).AppendLine("            bindingContext.Result = ModelBindingResult.Failed();");
+        sb.Append(indent).AppendLine("        }");
+        sb.Append(indent).AppendLine();
+        sb.Append(indent).AppendLine("        return System.Threading.Tasks.Task.CompletedTask;");
+        sb.Append(indent).AppendLine("    }");
+        sb.Append(indent).AppendLine("}");
+        sb.AppendLine();
+    }
+
+    /// <summary>Emits one abstract action method (verb/route/authorization attributes plus the signature) for <paramref name="method"/>.</summary>
     private static void EmitControllerMethod(StringBuilder sb, string indent, ApiMethodModel method)
     {
         string httpAttr = method.Verb switch
@@ -80,6 +131,7 @@ internal static class ServerControllerEmitter
         sb.AppendLine();
     }
 
+    /// <summary>Computes the generated action method's <c>Task&lt;ActionResult&lt;...&gt;&gt;</c>-shaped return type for <paramref name="method"/>.</summary>
     private static string ActionResultReturnType(ApiMethodModel method)
     {
         if (method.ResponseTypeFullName is null)
@@ -91,6 +143,7 @@ internal static class ServerControllerEmitter
         return $"global::System.Threading.Tasks.Task<ActionResult<{method.ResponseTypeFullName}>>";
     }
 
+    /// <summary>Formats one method parameter, including its ASP.NET Core binding attribute (<c>[FromRoute]</c>/<c>[FromQuery]</c>/<c>[FromBody]</c>/<c>[FromForm]</c>) and default value.</summary>
     private static string FormatParameter(ApiParameterModel p)
     {
         if (p.Kind == ParameterKind.CancellationToken)
@@ -98,12 +151,13 @@ internal static class ServerControllerEmitter
 
         if (p.Kind == ParameterKind.File)
         {
-            // The client-side FormFile record is a wire-level convenience type; ASP.NET Core's
-            // own model binder understands IFormFile/List<IFormFile>, not FormFile, so this
+            // The client-side FormFile/FormFile<TMetadata> is a wire-level convenience type;
+            // ASP.NET Core's own model binder understands IFormFile, not FormFile, so this
             // deliberately ignores TypeFullName (which still says "FormFile") for this Kind.
-            string fileType = p.IsMultiFile
-                ? "global::System.Collections.Generic.List<global::Microsoft.AspNetCore.Http.IFormFile>"
-                : "global::Microsoft.AspNetCore.Http.IFormFile";
+            // ServerFileTypeFullName was computed at parse time to mirror the client's exact
+            // collection shape (array/List<>/IEnumerable<>/etc.) wherever ASP.NET Core's model
+            // binder is verified to support it -- see TryGetFileParameterShape.
+            string fileType = p.ServerFileTypeFullName!;
 
             if (p.IsNullable) fileType += "?";
 
@@ -115,7 +169,14 @@ internal static class ServerControllerEmitter
         {
             ParameterKind.Body => "[FromBody] ",
             ParameterKind.Query => "[FromQuery] ",
-            ParameterKind.Form => "[FromForm] ",
+            // A simple-typed [Form] field binds via the ordinary [FromForm] path, unchanged.
+            // A complex one has no meaningful per-property multipart shape, so it's JSON inside
+            // one field instead -- bound via the nested JsonFormFieldBinder emitted above rather
+            // than [FromForm], since ModelBinderAttribute and FromFormAttribute can't be combined
+            // on the same parameter.
+            ParameterKind.Form => p.IsSimpleType
+                ? "[FromForm] "
+                : "[ModelBinder(BinderType = typeof(JsonFormFieldBinder))] ",
             ParameterKind.RouteOrAuto => "[FromRoute] ",
             _ => ""
         };
@@ -126,6 +187,7 @@ internal static class ServerControllerEmitter
         return result;
     }
 
+    /// <summary>Formats an <c>[Authorize]</c>/<c>[Authorize(Roles = ..., Policy = ...)]</c> attribute from the given roles/policy.</summary>
     private static string FormatAuthorizeAttribute(string? roles, string? policy)
     {
         var args = new System.Collections.Generic.List<string>();
@@ -134,5 +196,6 @@ internal static class ServerControllerEmitter
         return args.Count == 0 ? "[Authorize]" : $"[Authorize({string.Join(", ", args)})]";
     }
 
+    /// <summary>Escapes backslashes and double quotes for embedding <paramref name="s"/> in a generated C# string literal.</summary>
     private static string EscapeString(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
 }

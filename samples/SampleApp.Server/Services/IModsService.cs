@@ -9,7 +9,7 @@ public interface IModsService
     Task<ModDto?> GetMod(int id);
     Task<ModDto> Upload(ModUploadDto dto);
     Task<ModDto> UploadWithScreenshot(string name, string description, IFormFile screenshot);
-    Task<ModDto> UploadWithGallery(string name, string description, List<IFormFile>? gallery);
+    Task<ModDto> UploadWithGallery(string name, string description, ModTags tags, IReadOnlyList<IFormFile>? gallery);
     Task<bool> Delete(int id);
 }
 
@@ -58,7 +58,7 @@ public sealed class InMemoryModsService : IModsService
         return Task.FromResult(mod);
     }
 
-    public Task<ModDto> UploadWithGallery(string name, string description, List<IFormFile>? gallery)
+    public Task<ModDto> UploadWithGallery(string name, string description, ModTags tags, IReadOnlyList<IFormFile>? gallery)
     {
         var mod = new ModDto(_mods.Count + 1, name, "you", 0);
         _mods.Add(mod);

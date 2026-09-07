@@ -12,11 +12,13 @@ namespace FlanderDev.RouteGen.Generators;
 /// </summary>
 internal static class ApiInterfaceReader
 {
+    /// <summary>Symbol display format producing fully-qualified, nullable-annotation-aware type names for generated code.</summary>
     private static readonly SymbolDisplayFormat FullyQualified =
         SymbolDisplayFormat.FullyQualifiedFormat.WithMiscellaneousOptions(
             SymbolDisplayMiscellaneousOptions.UseSpecialTypes |
             SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
+    /// <summary>Special types considered safe to bind from a route segment or query string.</summary>
     private static readonly HashSet<SpecialType> SimpleSpecialTypes =
     [
         SpecialType.System_String, SpecialType.System_Boolean, SpecialType.System_Byte,
@@ -26,6 +28,7 @@ internal static class ApiInterfaceReader
         SpecialType.System_Decimal, SpecialType.System_Char,
     ];
 
+    /// <summary>Parses <paramref name="interfaceSymbol"/> into an <see cref="ApiInterfaceModel"/>, or returns null if it isn't <see cref="ApiRouteAttribute"/>-decorated. Reports any RouteGen diagnostics found along the way into <paramref name="diagnostics"/>.</summary>
     public static ApiInterfaceModel? TryParse(
         INamedTypeSymbol interfaceSymbol,
         List<Diagnostic> diagnostics)
@@ -70,6 +73,7 @@ internal static class ApiInterfaceReader
         return model;
     }
 
+    /// <summary>Reads and validates every attribute/parameter on an interface method, or returns null if it isn't an HTTP-verb-attributed operation.</summary>
     private static ApiMethodModel? ParseMethod(
         IMethodSymbol method,
         ApiInterfaceModel owner,
@@ -230,9 +234,10 @@ internal static class ApiInterfaceReader
             {
                 paramModel.Kind = ParameterKind.File;
 
-                if (TryGetFileParameterShape(paramType, out bool isMultiFile))
+                if (TryGetFileParameterShape(paramType, out bool isMultiFile, out string? serverTypeFullName))
                 {
                     paramModel.IsMultiFile = isMultiFile;
+                    paramModel.ServerFileTypeFullName = serverTypeFullName;
                 }
                 else
                 {
@@ -247,7 +252,12 @@ internal static class ApiInterfaceReader
             else if (isForm)
             {
                 paramModel.Kind = ParameterKind.Form;
-                CheckSimpleType(paramType, param, method, diagnostics);
+                // No type restriction here (unlike [Query]/route parameters, which still go
+                // through CheckSimpleType/RG0006): a simple-typed field is sent as a plain
+                // string; anything else is JSON-serialized into the field instead. IsSimpleType
+                // just records which path the emitters should take -- it is never a reason to
+                // reject the parameter for [Form].
+                paramModel.IsSimpleType = IsSimpleType(paramType);
             }
             else if (matches)
             {
@@ -304,41 +314,105 @@ internal static class ApiInterfaceReader
     }
 
     /// <summary>
-    /// Determines whether a type is a valid <see cref="FileAttribute"/> parameter type: either a
-    /// single <c>FormFile</c>, or a list-like collection of them (<c>IReadOnlyList&lt;FormFile&gt;</c>,
-    /// <c>IEnumerable&lt;FormFile&gt;</c>, <c>IList&lt;FormFile&gt;</c>, <c>List&lt;FormFile&gt;</c>,
-    /// <c>ICollection&lt;FormFile&gt;</c>, or <c>FormFile[]</c>), optionally nullable either way
-    /// (nullability itself is tracked separately via <see cref="IsNullableType"/>).
+    /// True when <paramref name="type"/> is a valid <c>[File]</c> parameter shape, in which case
+    /// <paramref name="serverTypeFullName"/> is the exact fully-qualified server-side type to
+    /// generate (the same shape as <paramref name="type"/>, with <c>IFormFile</c> substituted for
+    /// <c>FormFile</c>/<c>FormFile&lt;TMetadata&gt;</c>).
+    ///
+    /// A single file is always safe. For multiple files, only shapes ASP.NET Core's own model
+    /// binder is verified to construct without throwing are accepted -- confirmed against
+    /// <c>ModelBindingHelper.GetCompatibleCollection&lt;T&gt;</c>
+    /// (https://github.com/dotnet/aspnetcore/blob/main/src/Mvc/Mvc.Core/src/ModelBinding/ModelBindingHelper.cs),
+    /// which the framework's own <c>FormFileModelBinder</c> uses for every multi-file parameter:
+    ///   - <c>T[]</c> -- always works (a <c>List&lt;T&gt;</c> is bound, then copied to an array).
+    ///   - Any of <c>IEnumerable&lt;T&gt;</c>, <c>ICollection&lt;T&gt;</c>, <c>IList&lt;T&gt;</c>,
+    ///     <c>IReadOnlyCollection&lt;T&gt;</c>, <c>IReadOnlyList&lt;T&gt;</c>, or <c>List&lt;T&gt;</c>
+    ///     itself -- always works (a <c>List&lt;T&gt;</c> is bound and assigned directly, since
+    ///     <c>List&lt;T&gt;</c> is assignable to every one of these).
+    ///   - Any OTHER concrete, non-abstract, generic collection class closed over
+    ///     <c>FormFile</c>/<c>FormFile&lt;TMetadata&gt;</c> -- works ONLY if it has an accessible
+    ///     public parameterless constructor AND implements <c>ICollection&lt;T&gt;</c>, since the
+    ///     binder falls back to <c>(ICollection&lt;T&gt;)Activator.CreateInstance(modelType)</c>
+    ///     for anything that isn't one of the shapes above. Types that satisfy
+    ///     <c>ICollection&lt;T&gt;</c> assignability but lack a public parameterless constructor
+    ///     (e.g. <c>ImmutableList&lt;T&gt;</c>, which has no public constructor at all) pass
+    ///     ASP.NET Core's own <c>CanGetCompatibleCollection&lt;T&gt;</c> check but then throw
+    ///     <c>MissingMethodException</c> from <c>GetCompatibleCollection&lt;T&gt;</c> at request
+    ///     time -- RouteGen checks the constructor explicitly so this fails at compile time
+    ///     instead, as RG0010, rather than reproducing that runtime landmine.
+    ///   - A non-generic concrete collection type hardcoded to a <c>FormFile</c> element type
+    ///     (e.g. a hand-written <c>class Gallery : List&lt;FormFile&gt;</c>) can never be
+    ///     mirrored -- there is no way to construct an analogous type closed over <c>IFormFile</c>
+    ///     instead, so these are always rejected (RG0010).
     /// </summary>
-    private static bool TryGetFileParameterShape(ITypeSymbol type, out bool isMultiFile)
+    private static bool TryGetFileParameterShape(ITypeSymbol type, out bool isMultiFile, out string? serverTypeFullName)
     {
+        const string ServerElementType = "global::Microsoft.AspNetCore.Http.IFormFile";
+
         isMultiFile = false;
+        serverTypeFullName = null;
 
         if (IsFormFileType(type))
+        {
+            serverTypeFullName = ServerElementType;
             return true;
+        }
 
         if (type is IArrayTypeSymbol arrayType && IsFormFileType(arrayType.ElementType))
         {
             isMultiFile = true;
+            serverTypeFullName = ServerElementType + "[]";
             return true;
         }
 
-        if (type is INamedTypeSymbol { IsGenericType: true } named &&
-            named.TypeArguments.Length == 1 &&
-            IsFormFileType(named.TypeArguments[0]) &&
-            named.Name is "IReadOnlyList" or "IEnumerable" or "IList" or "List"
-                or "ICollection" or "IReadOnlyCollection")
+        if (type is INamedTypeSymbol { IsGenericType: true, TypeArguments.Length: 1 } named &&
+            IsFormFileType(named.TypeArguments[0]))
         {
             isMultiFile = true;
+            string containerName = "global::" + named.ContainingNamespace.ToDisplayString() + "." + named.Name;
+
+            bool isListAssignableShape = named.Name is
+                "List" or "IEnumerable" or "ICollection" or "IList" or "IReadOnlyCollection" or "IReadOnlyList";
+
+            if (isListAssignableShape)
+            {
+                serverTypeFullName = containerName + "<" + ServerElementType + ">";
+                return true;
+            }
+
+            // Anything else: only safe if ASP.NET Core can actually Activator.CreateInstance it
+            // and treat it as an ICollection<T> -- see the constructor/interface checks below.
+            bool hasPublicParameterlessCtor = named.InstanceConstructors
+                .Any(c => c.Parameters.IsEmpty && c.DeclaredAccessibility == Accessibility.Public);
+            bool implementsMatchingICollection = named.AllInterfaces.Any(i =>
+                i is { Name: "ICollection", IsGenericType: true, TypeArguments.Length: 1 } &&
+                IsFormFileType(i.TypeArguments[0]));
+
+            if (named.TypeKind == TypeKind.Class && !named.IsAbstract &&
+                hasPublicParameterlessCtor && implementsMatchingICollection)
+            {
+                serverTypeFullName = containerName + "<" + ServerElementType + ">";
             return true;
+        }
+
+            isMultiFile = false;
+            return false;
         }
 
         return false;
     }
 
+    /// <summary>True when <paramref name="type"/> is <see cref="FormFile"/> or a closed <see cref="FormFile{TMetadata}"/>.</summary>
     private static bool IsFormFileType(ITypeSymbol type) =>
-        type is INamedTypeSymbol { Name: "FormFile" };
+        type is INamedTypeSymbol { Name: "FormFile", Arity: 0 or 1 } named &&
+        named.ContainingNamespace?.ToDisplayString() == "FlanderDev.RouteGen.Abstractions";
 
+    /// <summary>
+    /// True when <paramref name="type"/> can hold null at runtime: a nullable reference type, a
+    /// nullable value type (<c>Nullable&lt;T&gt;</c>), or -- defensively, since <c>default</c>
+    /// means null for those two cases just as much as it means zero for a plain value type -- a
+    /// parameter whose declared default value is literally null.
+    /// </summary>
     private static bool IsNullableType(ITypeSymbol type, IParameterSymbol? param)
     {
         if (type.NullableAnnotation == NullableAnnotation.Annotated)
@@ -353,24 +427,29 @@ internal static class ApiInterfaceReader
         return false;
     }
 
-    private static void CheckSimpleType(
-        ITypeSymbol type,
-        IParameterSymbol param,
-        IMethodSymbol method,
-        List<Diagnostic> diagnostics)
+    /// <summary>True when <paramref name="type"/> (unwrapping <c>Nullable&lt;T&gt;</c> first) is a route/query-safe simple type: a primitive, string, enum, Guid, DateTime, or similar.</summary>
+    private static bool IsSimpleType(ITypeSymbol type)
     {
         var underlying = type;
 
         if (underlying is INamedTypeSymbol { Name: "Nullable", IsGenericType: true } nullable)
             underlying = nullable.TypeArguments[0];
 
-        bool ok = underlying.TypeKind == TypeKind.Enum
+        return underlying.TypeKind == TypeKind.Enum
             || SimpleSpecialTypes.Contains(underlying.SpecialType)
             || underlying.ToDisplayString(FullyQualified) is
                 "global::System.Guid" or "global::System.DateTime" or "global::System.DateTimeOffset"
                 or "global::System.TimeSpan" or "global::System.DateOnly" or "global::System.TimeOnly";
+    }
 
-        if (!ok)
+    /// <summary>Reports <see cref="RouteGenDiagnostics.UnsupportedSimpleType"/> unless <see cref="IsSimpleType"/> is true for <paramref name="type"/>. Used for route/query parameters only -- <c>[Form]</c> has no such restriction, see <see cref="ApiParameterModel.IsSimpleType"/>.</summary>
+    private static void CheckSimpleType(
+        ITypeSymbol type,
+        IParameterSymbol param,
+        IMethodSymbol method,
+        List<Diagnostic> diagnostics)
+    {
+        if (!IsSimpleType(type))
         {
             diagnostics.Add(Diagnostic.Create(
                 RouteGenDiagnostics.UnsupportedSimpleType,
@@ -381,11 +460,13 @@ internal static class ApiInterfaceReader
         }
     }
 
+    /// <summary>True when <paramref name="attributeType"/> is (or is named like) <paramref name="simpleName"/>, tolerating attributes from any namespace.</summary>
     private static bool IsAttribute(INamedTypeSymbol? attributeType, string simpleName)
         => attributeType is not null &&
            (attributeType.Name == simpleName ||
             attributeType.ToDisplayString().EndsWith("." + simpleName, System.StringComparison.Ordinal));
 
+    /// <summary>Reports <see cref="RouteGenDiagnostics.RouteCollision"/> for any two methods on <paramref name="model"/> that resolve to the same verb and route.</summary>
     private static void DetectRouteCollisions(
          ApiInterfaceModel model,
          List<Diagnostic> diagnostics)
@@ -415,6 +496,7 @@ internal static class ApiInterfaceReader
         }
     }
 
+    /// <summary>Reads an <see cref="AuthorizeAttribute"/> from <paramref name="attributes"/>, if present.</summary>
     private static (bool authorize, string? roles, string? policy) ReadAuthorize(
         ImmutableArray<AttributeData> attributes)
     {
@@ -435,6 +517,7 @@ internal static class ApiInterfaceReader
         return (true, roles, policy);
     }
 
+    /// <summary>Formats a parameter's declared default value as a C# literal usable in generated source, handling null, enum, string, bool, and char specially.</summary>
     private static string? FormatDefault(IParameterSymbol param)
     {
         if (!param.HasExplicitDefaultValue) return null;
@@ -468,12 +551,17 @@ internal static class ApiInterfaceReader
         return value.ToString();
     }
 
+    /// <summary>The first source location for <paramref name="symbol"/>, or <see cref="Location.None"/> if it has none.</summary>
     private static Location GetLocation(ISymbol symbol) =>
         symbol.Locations.FirstOrDefault() ?? Location.None;
 
+    /// <summary>The HTTP verb and optional route suffix parsed from a method's verb attribute.</summary>
     private readonly struct HttpVerbInfo(string verb, string? suffix)
     {
+        /// <summary>The HTTP verb, e.g. "GET".</summary>
         public string Verb { get; } = verb;
+
+        /// <summary>The route template suffix, if any.</summary>
         public string? Suffix { get; } = suffix;
     }
 }

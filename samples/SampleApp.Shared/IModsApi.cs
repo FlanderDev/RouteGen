@@ -21,24 +21,28 @@ public partial interface IModsApi
     [Authorize]
     Task<ModDto> Upload([Body] ModUploadDto dto);
 
-    // [Form]/[File] demonstrate multipart/form-data: ordinary form fields alongside a single
-    // required file. Not combinable with [Body] on the same method (a request has one content
-    // type) -- see RG0009.
+    // [File] can be FormFile<TMetadata> instead of plain FormFile when the caller needs to
+    // attach local data to the upload -- UploadClientContext here never reaches the server (see
+    // FormFile<TMetadata>'s doc comment); it's purely for the caller's own bookkeeping around
+    // the call (e.g. correlating this upload with UI state or a retry attempt).
     [Post("upload-with-screenshot")]
     [Authorize]
     Task<ModDto> UploadWithScreenshot(
         [Form] string name,
         [Form] string description,
-        [File] FormFile screenshot,
+        [File] FormFile<UploadClientContext> screenshot,
         CancellationToken ct = default);
 
     // [File] on an IReadOnlyList<FormFile>? parameter is the multi-file form: several files
     // under the same field name, here optional (the mod can be uploaded without a gallery).
+    // [Form] tags is a complex type (not a primitive/string/enum/etc.) -- [Form] places no type
+    // restriction, so this is JSON-serialized into its own field rather than sent as plain text.
     [Post("upload-with-gallery")]
     [Authorize]
     Task<ModDto> UploadWithGallery(
         [Form] string name,
         [Form] string description,
+        [Form] ModTags tags,
         [File] IReadOnlyList<FormFile>? gallery,
         CancellationToken ct = default);
 
@@ -53,7 +57,15 @@ public enum SortBy
     Newest = 1,
 }
 
+// Purely local to the client -- attached to a FormFile<TMetadata> upload but never sent to the
+// server. Any type works here; this one just happens to be a record for convenience.
+public sealed record UploadClientContext(string CorrelationId, int AttemptNumber);
+
 public sealed record ModDto(int Id, string Name, string Author, int Downloads);
+
+// A complex [Form] parameter: sent/bound as one JSON-serialized field rather than plain text,
+// since there's no meaningful single-string form for a type like this.
+public sealed record ModTags(string[] Categories, bool IsNsfw);
 
 public sealed record ModListResult(IReadOnlyList<ModDto> Items, int TotalCount);
 

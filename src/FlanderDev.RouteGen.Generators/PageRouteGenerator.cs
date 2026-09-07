@@ -13,14 +13,17 @@ namespace FlanderDev.RouteGen.Generators;
 [Generator(LanguageNames.CSharp)]
 public sealed class PageRouteGenerator : IIncrementalGenerator
 {
+    /// <summary>Matches an <c>@page "..."</c> directive and captures the route template.</summary>
     private static readonly Regex PageDirectiveRegex = new(
         "^\\s*@page\\s+\"([^\"]+)\"",
         RegexOptions.Compiled | RegexOptions.Multiline);
 
+    /// <summary>Matches an <c>@attribute [GeneratedPathName("...")]</c> directive and captures the override name.</summary>
     private static readonly Regex GeneratedPathNameRegex = new(
         "@attribute\\s+\\[\\s*GeneratedPathName\\s*\\(\\s*\"([^\"]+)\"\\s*\\)\\s*\\]",
         RegexOptions.Compiled);
 
+    /// <inheritdoc cref="IIncrementalGenerator.Initialize"/>
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var razorFiles = context.AdditionalTextsProvider
@@ -70,6 +73,7 @@ public sealed class PageRouteGenerator : IIncrementalGenerator
         });
     }
 
+    /// <summary>Extracts the <c>@page</c> route and (optional) <c>[GeneratedPathName]</c> override from a single <c>.razor</c> file, or returns null if it has no <c>@page</c> directive.</summary>
     private static PageRouteInfo? ParsePage(
         AdditionalText text,
         System.Threading.CancellationToken ct)
@@ -96,6 +100,7 @@ public sealed class PageRouteGenerator : IIncrementalGenerator
         return new PageRouteInfo(memberName, route, template);
     }
 
+    /// <summary>Strips <paramref name="name"/> down to a valid C# identifier (letters, digits, underscores; never starting with a digit).</summary>
     private static string SanitizeIdentifier(string name)
     {
         var sb = new StringBuilder();
@@ -112,6 +117,7 @@ public sealed class PageRouteGenerator : IIncrementalGenerator
         return sb.ToString();
     }
 
+    /// <summary>Renders the full source text of the generated <c>Paths</c> class for <paramref name="pages"/>.</summary>
     private static string EmitPathsClass(
         string rootNamespace,
         List<PageRouteInfo> pages)
@@ -169,6 +175,7 @@ public sealed class PageRouteGenerator : IIncrementalGenerator
         return sb.ToString();
     }
 
+    /// <summary>Builds the interpolated-string body for a parameterized page's generated method, substituting each route token with its matching parameter (URL-escaped for string-typed tokens).</summary>
     private static string BuildInterpolated(
         RouteTemplate template,
         List<(string Name, string Type, RouteParameterPart Token)> parameters)
@@ -209,6 +216,7 @@ public sealed class PageRouteGenerator : IIncrementalGenerator
         return sb.ToString();
     }
 
+    /// <summary>Maps an ASP.NET Core route constraint (e.g. "int") to the C# parameter type to generate; unrecognized/absent constraints default to <c>string</c>.</summary>
     private static string MapConstraintToType(string? constraint) => constraint switch
     {
         "int" => "int",
@@ -221,19 +229,30 @@ public sealed class PageRouteGenerator : IIncrementalGenerator
         _ => "string"
     };
 
+    /// <summary>Lowercases the first character of <paramref name="s"/>, so route tokens become valid camelCase parameter names.</summary>
     private static string LowerFirst(string s) =>
         s.Length == 0 ? s : char.ToLowerInvariant(s[0]) + s.Substring(1);
 
+    /// <summary>Escapes backslashes and double quotes for embedding <paramref name="s"/> in a generated C# string literal.</summary>
     private static string EscapeString(string s) =>
         s.Replace("\\", "\\\\").Replace("\"", "\\\"");
 
+    /// <summary>A single parsed <c>@page</c> route, ready to emit as a <c>Paths</c> member.</summary>
+    /// <param name="memberName">The generated member's name.</param>
+    /// <param name="route">The raw route template from the <c>@page</c> directive.</param>
+    /// <param name="template">The parsed route template.</param>
     private sealed class PageRouteInfo(
         string memberName,
         string route,
         RouteTemplate template)
     {
+        /// <summary>The generated member's name.</summary>
         public string MemberName { get; } = memberName;
+
+        /// <summary>The raw route template from the <c>@page</c> directive.</summary>
         public string Route { get; } = route;
+
+        /// <summary>The parsed route template.</summary>
         public RouteTemplate Template { get; } = template;
     }
 }

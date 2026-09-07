@@ -16,6 +16,9 @@ public sealed class ApiException : Exception
     /// <summary>The raw response body, if any was returned.</summary>
     public string? ResponseBody { get; }
 
+    /// <summary>Creates an <see cref="ApiException"/> for a failed call with no inner exception.</summary>
+    /// <param name="statusCode">The response status code.</param>
+    /// <param name="responseBody">The raw response body, if any.</param>
     public ApiException(HttpStatusCode statusCode, string? responseBody)
         : base($"API call failed with status {(int)statusCode} ({statusCode}).")
     {
@@ -23,6 +26,10 @@ public sealed class ApiException : Exception
         ResponseBody = responseBody;
     }
 
+    /// <inheritdoc cref="ApiException(HttpStatusCode, string?)"/>
+    /// <param name="statusCode">The response status code.</param>
+    /// <param name="responseBody">The raw response body, if any.</param>
+    /// <param name="innerException">The exception that caused this one, if any.</param>
     public ApiException(HttpStatusCode statusCode, string? responseBody, Exception innerException)
         : base($"API call failed with status {(int)statusCode} ({statusCode}).", innerException)
     {

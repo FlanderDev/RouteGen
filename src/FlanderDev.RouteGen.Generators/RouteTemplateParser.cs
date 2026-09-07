@@ -8,13 +8,21 @@ namespace FlanderDev.RouteGen.Generators;
 /// A parsed route template. The parser deliberately keeps ASP.NET Core route constraints as
 /// opaque strings; the generator consumes only the structural information it needs.
 /// </summary>
+/// <param name="original">The original, unparsed route template string.</param>
+/// <param name="parts">Every literal and parameter part, in source order.</param>
+/// <param name="parameters">Every parameter part, in source order (a subset of <paramref name="parts"/>).</param>
 internal sealed class RouteTemplate(
     string original,
     IReadOnlyList<RouteTemplatePart> parts,
     IReadOnlyList<RouteParameterPart> parameters)
 {
+    /// <summary>The original, unparsed route template string.</summary>
     public string Original { get; } = original;
+
+    /// <summary>Every literal and parameter part, in source order.</summary>
     public IReadOnlyList<RouteTemplatePart> Parts { get; } = parts;
+
+    /// <summary>Every parameter part, in source order (a subset of <see cref="Parts"/>).</summary>
     public IReadOnlyList<RouteParameterPart> Parameters { get; } = parameters;
 }
 
@@ -22,8 +30,10 @@ internal sealed class RouteTemplate(
 internal abstract class RouteTemplatePart;
 
 /// <summary>Literal text in a route template.</summary>
+/// <param name="text">The literal text.</param>
 internal sealed class RouteLiteralPart(string text) : RouteTemplatePart
 {
+    /// <summary>The literal text.</summary>
     public string Text { get; } = text;
 }
 
@@ -32,15 +42,26 @@ internal sealed class RouteLiteralPart(string text) : RouteTemplatePart
 /// Constraint/default text is kept opaque so the parser does not need to know every ASP.NET
 /// Core constraint that may be added in the future.
 /// </summary>
+/// <param name="name">The parameter's name.</param>
+/// <param name="constraint">The constraint text (e.g. "int"), if any.</param>
+/// <param name="optional">True when the parameter was written with a trailing "?".</param>
+/// <param name="defaultValue">The default-value text (e.g. "1" in "{page:int=1}"), if any.</param>
 internal sealed class RouteParameterPart(
     string name,
     string? constraint,
     bool optional,
     string? defaultValue) : RouteTemplatePart
 {
+    /// <summary>The parameter's name.</summary>
     public string Name { get; } = name;
+
+    /// <summary>The constraint text (e.g. "int"), if any.</summary>
     public string? Constraint { get; } = constraint;
+
+    /// <summary>True when the parameter was written with a trailing "?".</summary>
     public bool Optional { get; } = optional;
+
+    /// <summary>The default-value text (e.g. "1" in "{page:int=1}"), if any.</summary>
     public string? DefaultValue { get; } = defaultValue;
 }
 
@@ -50,6 +71,7 @@ internal sealed class RouteParameterPart(
 /// </summary>
 internal static class RouteTemplateParser
 {
+    /// <summary>Parses a route template into its literal and parameter parts.</summary>
     public static RouteTemplate Parse(string template)
     {
         var parts = new List<RouteTemplatePart>();
@@ -144,6 +166,7 @@ internal static class RouteTemplateParser
         return sb.ToString();
     }
 
+    /// <summary>Appends the buffered literal text in <paramref name="literal"/> to <paramref name="parts"/> as a <see cref="RouteLiteralPart"/>, if non-empty.</summary>
     private static void FlushLiteral(List<RouteTemplatePart> parts, StringBuilder literal)
     {
         if (literal.Length == 0) return;
@@ -151,6 +174,7 @@ internal static class RouteTemplateParser
         literal.Clear();
     }
 
+    /// <summary>Finds the index of the closing '}' for a parameter starting at <paramref name="start"/>, tolerating balanced parentheses within constraints; returns -1 if unterminated.</summary>
     private static int FindParameterEnd(string template, int start)
     {
         int parenthesisDepth = 0;
@@ -182,6 +206,7 @@ internal static class RouteTemplateParser
         return -1;
     }
 
+    /// <summary>Parses the inner text of a <c>{...}</c> route token into a <see cref="RouteParameterPart"/>. Returns false for an empty/unnamed token.</summary>
     private static bool TryParseParameter(string inner, out RouteParameterPart parameter)
     {
         bool optional = inner.EndsWith("?", StringComparison.Ordinal);
@@ -217,6 +242,7 @@ internal static class RouteTemplateParser
         return true;
     }
 
+    /// <summary>Finds the first occurrence of <paramref name="target"/> in <paramref name="value"/> that isn't nested inside parentheses; returns -1 if none.</summary>
     private static int FindTopLevel(string value, char target)
     {
         int parenthesisDepth = 0;

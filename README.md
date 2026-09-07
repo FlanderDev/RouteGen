@@ -86,8 +86,9 @@ Task<ModDto> UploadWithScreenshot(
     [File] FormFile screenshot,
     CancellationToken ct = default);
 
-// [File] on an IReadOnlyList<FormFile> (optionally nullable) parameter accepts several files
-// under the same field name.
+// [File] on a collection-of-FormFile-typed parameter (optionally nullable) accepts several
+// files under the same field name. IReadOnlyList<FormFile> here; List<>, an array, and several
+// other shapes work too -- see the exact accepted list below.
 [Post("upload-with-gallery")]
 [Authorize]
 Task<ModDto> UploadWithGallery(
@@ -97,15 +98,45 @@ Task<ModDto> UploadWithGallery(
     CancellationToken ct = default);
 ```
 
-- `[Form]` parameters must be simple types (same rule as `[Query]`) and become `[FromForm]`
-  server-side / a `StringContent` part client-side.
-- `[File]` parameters must be `FormFile` (single file) or `IReadOnlyList<FormFile>` — optionally
-  nullable either way — never anything else (RG0010). Server-side these become
-  `IFormFile`/`List<IFormFile>`; client-side, `FormFile` (from `RouteGen.Abstractions`) is a
-  small `record` — `FormFile(Stream Content, string FileName, string? ContentType)` — that
-  carries what a multipart file part needs to be built correctly. The caller owns the `Stream`
-  and is responsible for disposing it once the call completes, same as any other API taking a
+- `[Form]` parameters can be any type. A simple type (same rule `[Query]` uses — primitives,
+  string, enum, Guid, DateTime, etc.) becomes `[FromForm]` server-side / a plain `StringContent`
+  part client-side, unchanged. Anything else is JSON-serialized into the one field instead —
+  server-side via a small generated model binder (nested in the controller base, emitted only
+  when a method actually needs it) that reads the raw field and deserializes it, since a complex
+  object has no meaningful single-string form the way a primitive does. This is a deliberate
+  choice over mirroring ASP.NET Core's per-property complex-form binding (`field.PropertyName`
+  for each property): that shape doesn't have an equivalent single declared parameter type to
+  generate a matching client for, the way `[File]`'s mirrored collection type does.
+- `[File]` parameters must be `FormFile`/`FormFile<TMetadata>` (single file), or — for multiple
+  files — one of: an array, `List<>`, `IEnumerable<>`, `ICollection<>`, `IList<>`,
+  `IReadOnlyList<>`, `IReadOnlyCollection<>` (of either), or another concrete generic collection
+  type with a public parameterless constructor that implements `ICollection<>` — optionally
+  nullable either way — never anything else (RG0010). **The server generates the exact same
+  collection type the client declared** (with `IFormFile` substituted for `FormFile`) — this
+  list isn't an arbitrary restriction, it's precisely the set of shapes
+  [ASP.NET Core's own model binder](https://github.com/dotnet/aspnetcore/blob/main/src/Mvc/Mvc.Core/src/ModelBinding/ModelBindingHelper.cs)
+  is verified able to construct without throwing at request time (types like
+  `ImmutableList<>` satisfy the interface check but have no public constructor, which throws
+  `MissingMethodException` from ASP.NET Core's own binder at runtime if used directly — RouteGen
+  checks for the constructor explicitly so this is rejected at compile time instead, as RG0010).
+  A non-generic custom collection class hardcoded to hold `FormFile` specifically can never be
+  mirrored this way, since there's no way to construct an analogous type over `IFormFile` — those
+  are always rejected too. Client-side, `FormFile` (from `RouteGen.Abstractions`) is a small
+  `record` — `FormFile(Stream Content, string FileName, string? ContentType)` — that carries
+  what a multipart file part needs to be built correctly. The caller owns the `Stream` and is
+  responsible for disposing it once the call completes, same as any other API taking a
   caller-supplied stream.
+- `FormFile<TMetadata>` attaches an arbitrary runtime value to the upload, for when the caller
+  needs to correlate it with local state (UI context, progress tracking, retry bookkeeping):
+
+  ```csharp
+  [File] FormFile<UploadContext> screenshot
+  // call site: new FormFile<UploadContext>(stream, "pic.png", Metadata: new UploadContext(...))
+  ```
+
+  `TMetadata` never reaches the server or changes the wire contract — `[File]` binds to
+  `IFormFile` server-side either way, exactly as it does for plain `FormFile`. If the data
+  genuinely needs to reach the server, send it as an ordinary `[Form]` field instead.
 - `[Body]` and `[Form]`/`[File]` can't be combined on the same method — an HTTP request only has
   one content type (RG0009).
 - There's no attribute for request size limits; that stays a hosting/infrastructure concern
@@ -195,7 +226,7 @@ If you'd rather keep Shared a plain contracts-only library with no generator dep
 | RG0007 | Duplicate `Paths` member name |
 | RG0008 | Unparseable route template |
 | RG0009 | `[Body]` combined with `[Form]`/`[File]` on the same method |
-| RG0010 | `[File]` parameter isn't `FormFile` or `IReadOnlyList<FormFile>` |
+| RG0010 | `[File]` parameter's collection type isn't verified-bindable — see the README |
 
 These turn what would be runtime URL bugs into build-time errors.
 

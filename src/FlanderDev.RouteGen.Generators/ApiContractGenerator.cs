@@ -31,6 +31,7 @@ namespace FlanderDev.RouteGen.Generators;
 [Generator(LanguageNames.CSharp)]
 public sealed class ApiContractGenerator : IIncrementalGenerator
 {
+    /// <inheritdoc cref="IIncrementalGenerator.Initialize"/>
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var provider = context.CompilationProvider.Select(static (compilation, ct) =>
@@ -82,6 +83,7 @@ public sealed class ApiContractGenerator : IIncrementalGenerator
         });
     }
 
+    /// <summary>Recursively collects every <c>[ApiRoute]</c>-decorated interface (including nested types) under <paramref name="ns"/> into <paramref name="results"/>, deduplicated via <paramref name="seen"/>.</summary>
     private static void CollectAttributedInterfaces(
         INamespaceSymbol ns, List<INamedTypeSymbol> results, HashSet<string> seen, CancellationToken ct)
     {
@@ -103,6 +105,7 @@ public sealed class ApiContractGenerator : IIncrementalGenerator
         }
     }
 
+    /// <summary>Adds <paramref name="type"/> to <paramref name="results"/> if it's an interface carrying <c>[ApiRoute]</c> and hasn't already been seen.</summary>
     private static void CollectIfAttributed(INamedTypeSymbol type, List<INamedTypeSymbol> results, HashSet<string> seen)
     {
         if (type.TypeKind != TypeKind.Interface) return;
@@ -112,6 +115,7 @@ public sealed class ApiContractGenerator : IIncrementalGenerator
         if (seen.Add(key)) results.Add(type);
     }
 
+    /// <summary>Finds a type named <paramref name="simpleName"/> in <paramref name="compilation"/>'s own assembly or any referenced assembly.</summary>
     private static INamedTypeSymbol? FindType(Compilation compilation, string simpleName)
     {
         var found = FindType(compilation.Assembly.GlobalNamespace, simpleName);
@@ -128,6 +132,7 @@ public sealed class ApiContractGenerator : IIncrementalGenerator
         return null;
     }
 
+    /// <summary>Recursively searches <paramref name="ns"/> (including nested types) for a type named <paramref name="simpleName"/>.</summary>
     private static INamedTypeSymbol? FindType(INamespaceSymbol ns, string simpleName)
     {
         foreach (var member in ns.GetMembers())
@@ -156,6 +161,7 @@ public sealed class ApiContractGenerator : IIncrementalGenerator
         return null;
     }
 
+    /// <summary>True when <paramref name="attributeType"/> is (or is named like) <paramref name="simpleName"/>, tolerating attributes from any namespace.</summary>
     private static bool IsAttribute(INamedTypeSymbol? attributeType, string simpleName)
         => attributeType is not null &&
            (attributeType.Name == simpleName ||
