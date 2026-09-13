@@ -2,15 +2,13 @@
 
 ### New Rules
 
-Rule ID | Title | Category
---------|-------|----------
-RG0001 | Duplicate route + verb | RouteGen
-RG0002 | [Body] used with a verb that does not accept a body | RouteGen
-RG0003 | Route token has no matching parameter | RouteGen
-RG0004 | Parameter does not appear in route template and is not [Query] or [Body] | RouteGen
-RG0005 | More than one [Body] parameter | RouteGen
-RG0006 | Type is not convertible to/from a URL segment or query string | RouteGen
-RG0007 | Ambiguous generated Paths member name | RouteGen
-RG0008 | Invalid or unparsable route template | RouteGen
-RG0009 | [Body] combined with [Form]/[File] on the same method | RouteGen
-RG0010 | [File] parameter has an unsupported type | RouteGen
+Rule ID | Category | Severity | Notes
+--------|----------|----------|-------
+RG0001 | RouteGen | Error | Duplicate route + verb
+RG0002 | RouteGen | Warning | [Body] used with a verb that does not accept a body
+RG0003 | RouteGen | Error | Route token has no matching parameter
+RG0004 | RouteGen | Error | Parameter does not appear in route template and is not [Query] or [Body]
+RG0005 | RouteGen | Error | More than one [Body] parameter
+RG0006 | RouteGen | Error | Type is not convertible to/from a URL segment or query string
+RG0007 | RouteGen | Error | Ambiguous generated Paths member name
+RG0008 | RouteGen | Error | Invalid or unparsable route template

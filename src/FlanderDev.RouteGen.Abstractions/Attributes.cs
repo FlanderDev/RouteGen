@@ -5,6 +5,7 @@ namespace FlanderDev.RouteGen.Abstractions;
 /// on the base route segment (e.g. "api/mods"). The RouteGen generators read this interface
 /// via the semantic model in both the server and client compilations.
 /// </summary>
+/// <param name="template">The base route template, e.g. "api/mods".</param>
 [AttributeUsage(AttributeTargets.Interface, Inherited = false, AllowMultiple = false)]
 public sealed class ApiRouteAttribute(string template) : Attribute
 {
@@ -19,7 +20,7 @@ public sealed class ApiRouteAttribute(string template) : Attribute
 }
 
 /// <summary>Base type for the per-method HTTP-verb attributes. Not intended to be used directly.</summary>
-/// <param name="template"></param>
+/// <param name="template">Route template suffix appended to the interface-level <see cref="ApiRouteAttribute"/> template. May be null/empty.</param>
 public abstract class HttpMethodAttribute(string? template) : Attribute
 {
     /// <summary>Route template suffix appended to the interface-level <see cref="ApiRouteAttribute"/> template. May be null/empty.</summary>
@@ -29,39 +30,55 @@ public abstract class HttpMethodAttribute(string? template) : Attribute
     public abstract string Verb { get; }
 }
 
-#region HTTP Verb Attributes
-#pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
+/// <inheritdoc cref="HttpMethodAttribute"/>
+/// <remarks>Maps to an HTTP GET request.</remarks>
+/// <param name="template">Route template suffix appended to the interface-level <see cref="ApiRouteAttribute"/> template. May be null/empty.</param>
 [AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
 public sealed class GetAttribute(string? template = null) : HttpMethodAttribute(template)
 {
+    /// <inheritdoc/>
     public override string Verb => "GET";
 }
 
+/// <inheritdoc cref="HttpMethodAttribute"/>
+/// <remarks>Maps to an HTTP POST request.</remarks>
+/// <param name="template">Route template suffix appended to the interface-level <see cref="ApiRouteAttribute"/> template. May be null/empty.</param>
 [AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
 public sealed class PostAttribute(string? template = null) : HttpMethodAttribute(template)
 {
+    /// <inheritdoc/>
     public override string Verb => "POST";
 }
 
+/// <inheritdoc cref="HttpMethodAttribute"/>
+/// <remarks>Maps to an HTTP PUT request.</remarks>
+/// <param name="template">Route template suffix appended to the interface-level <see cref="ApiRouteAttribute"/> template. May be null/empty.</param>
 [AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
 public sealed class PutAttribute(string? template = null) : HttpMethodAttribute(template)
 {
+    /// <inheritdoc/>
     public override string Verb => "PUT";
 }
 
+/// <inheritdoc cref="HttpMethodAttribute"/>
+/// <remarks>Maps to an HTTP DELETE request.</remarks>
+/// <param name="template">Route template suffix appended to the interface-level <see cref="ApiRouteAttribute"/> template. May be null/empty.</param>
 [AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
 public sealed class DeleteAttribute(string? template = null) : HttpMethodAttribute(template)
 {
+    /// <inheritdoc/>
     public override string Verb => "DELETE";
 }
 
+/// <inheritdoc cref="HttpMethodAttribute"/>
+/// <remarks>Maps to an HTTP PATCH request.</remarks>
+/// <param name="template">Route template suffix appended to the interface-level <see cref="ApiRouteAttribute"/> template. May be null/empty.</param>
 [AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
 public sealed class PatchAttribute(string? template = null) : HttpMethodAttribute(template)
 {
+    /// <inheritdoc/>
     public override string Verb => "PATCH";
 }
-#pragma warning restore CS1591 // Missing XML comment for publicly visible type or member
-#endregion
 
 /// <summary>Marks a parameter as bound from the query string. Optional/nullable parameters are omitted from the generated client's query string when null/default.</summary>
 [AttributeUsage(AttributeTargets.Parameter, Inherited = false, AllowMultiple = false)]
@@ -74,9 +91,9 @@ public sealed class BodyAttribute : Attribute { }
 /// <summary>
 /// Marks a scalar/simple-type parameter as one field of a <c>multipart/form-data</c> request.
 /// Combine with one or more <see cref="FileAttribute"/> parameters on the same method; a method
-/// may use <see cref="Form"/>/<see cref="FileAttribute"/> or <see cref="BodyAttribute"/>, never
-/// both -- a real HTTP request only has one content type, and RouteGen enforces that at compile
-/// time (see diagnostic RG0009).
+/// may use <see cref="FormAttribute"/>/<see cref="FileAttribute"/> or <see cref="BodyAttribute"/>,
+/// never both -- a real HTTP request only has one content type, and RouteGen enforces that at
+/// compile time (see diagnostic RG0009).
 /// Server-side this becomes <c>[FromForm]</c>; client-side it's added to the generated
 /// <c>MultipartFormDataContent</c> as a string part.
 /// </summary>
@@ -84,16 +101,26 @@ public sealed class BodyAttribute : Attribute { }
 public sealed class FormAttribute : Attribute { }
 
 /// <summary>
-/// Marks a parameter as one (or, for a <c>IReadOnlyList&lt;FormFile&gt;</c>-typed parameter,
-/// several) uploaded file(s) in a <c>multipart/form-data</c> request. The parameter type must be
-/// <see cref="FormFile"/> for a single file, or <c>IReadOnlyList&lt;FormFile&gt;</c> (optionally
-/// nullable) for multiple files under the same field name -- see diagnostic RG0010 for any other
-/// type. Combine with <see cref="FormAttribute"/> parameters for accompanying form fields; not
+/// Marks a parameter as one (or, for a supported collection-typed parameter, several) uploaded
+/// file(s) in a <c>multipart/form-data</c> request -- optionally paired with per-file data via
+/// <see cref="FileWithData{TData}"/> instead of a plain <see cref="FormFile"/>.
+/// The parameter type must be <see cref="FormFile"/> or <see cref="FileWithData{TData}"/> for a
+/// single file; for multiple files it must be an array, one of <c>IEnumerable&lt;&gt;</c>/
+/// <c>ICollection&lt;&gt;</c>/<c>IList&lt;&gt;</c>/<c>IReadOnlyList&lt;&gt;</c>/
+/// <c>IReadOnlyCollection&lt;&gt;</c>/<c>List&lt;&gt;</c> of either, or another concrete generic
+/// collection type with a public parameterless constructor implementing <c>ICollection&lt;&gt;</c>
+/// (optionally nullable either way) -- see diagnostic RG0010 for any other type. This isn't an
+/// arbitrary restriction: the server mirrors whichever of these shapes the client declares, and
+/// only shapes ASP.NET Core's own model binder is verified (against its source) to construct
+/// without throwing at request time are accepted.
+/// Combine with <see cref="FormAttribute"/> parameters for accompanying form fields; not
 /// combinable with <see cref="BodyAttribute"/> on the same method (RG0009).
-/// Server-side a single file becomes <c>[FromForm] IFormFile</c>, and multiple files become
-/// <c>[FromForm] List&lt;IFormFile&gt;</c>. Client-side, the generated implementation adds each
-/// file's <see cref="FormFile.Content"/> stream to the request as a file part under the same
-/// field name, using <see cref="FormFile.FileName"/> and <see cref="FormFile.ContentType"/>.
+/// A plain <see cref="FormFile"/> becomes <c>[FromForm] IFormFile</c> server-side, over the same
+/// collection shape the client declared for the multi-file case. A
+/// <see cref="FileWithData{TData}"/> (or a collection of them) instead becomes the generated
+/// controller base's own nested <c>FileWithData&lt;TData&gt;</c> record, reconstructed by a
+/// generated model binder from the file and its JSON-serialized data -- correlated by field name
+/// (e.g. <c>photos[0].file</c> / <c>photos[0].data</c>), not by list position.
 /// </summary>
 [AttributeUsage(AttributeTargets.Parameter, Inherited = false, AllowMultiple = false)]
 public sealed class FileAttribute : Attribute { }
@@ -102,9 +129,11 @@ public sealed class FileAttribute : Attribute { }
 /// Explicit override escape hatch: binds a parameter to a specific route-template token name
 /// when it differs from the parameter's own name (route parameters are inferred by name-matching by default).
 /// </summary>
+/// <param name="name">The route-template token name this parameter binds to.</param>
 [AttributeUsage(AttributeTargets.Parameter, Inherited = false, AllowMultiple = false)]
 public sealed class RouteAttribute(string? name = null) : Attribute
 {
+    /// <summary>The route-template token name this parameter binds to.</summary>
     public string? Name { get; } = name;
 }
 
@@ -116,7 +145,10 @@ public sealed class RouteAttribute(string? name = null) : Attribute
 [AttributeUsage(AttributeTargets.Method | AttributeTargets.Interface, Inherited = false, AllowMultiple = true)]
 public sealed class AuthorizeAttribute : Attribute
 {
+    /// <summary>A comma-separated list of roles required, if any.</summary>
     public string? Roles { get; set; }
+
+    /// <summary>The name of an authorization policy required, if any.</summary>
     public string? Policy { get; set; }
 }
 
@@ -127,10 +159,37 @@ public sealed class AllowAnonymousAttribute : Attribute { }
 /// <summary>
 /// Opt-in override for the page-route generator's default member-naming heuristic. Apply to a
 /// Razor component with <c>@attribute [GeneratedPathName("ModDetail")]</c> when the default
-/// derived name would be ambiguous or undesirable.
+/// derived name would be ambiguous or undesirable, or use the two-argument form to name a
+/// specific route on a component that declares more than one <c>@page</c> directive (required
+/// for every route beyond the first -- see RG0012).
 /// </summary>
-[AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
-public sealed class GeneratedPathNameAttribute(string name) : Attribute
+[AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = true)]
+public sealed class GeneratedPathNameAttribute : Attribute
 {
-    public string Name { get; } = name;
+    /// <summary>The member name to generate on <c>Paths</c> for this page.</summary>
+    public string Name { get; }
+
+    /// <summary>
+    /// The exact route template text (matching a <c>@page</c> directive verbatim) this override
+    /// applies to, or null when applied via the single-argument constructor -- which only makes
+    /// sense for a component's sole (or first) <c>@page</c> route, since there'd otherwise be no
+    /// way to tell which of several routes it was meant to name.
+/// </summary>
+    public string? Route { get; }
+
+    /// <summary>Names the component's only (or first) <c>@page</c> route.</summary>
+    /// <param name="name">The member name to generate on <c>Paths</c>.</param>
+    public GeneratedPathNameAttribute(string name)
+{
+        Name = name;
+    }
+
+    /// <summary>Names one specific <c>@page</c> route on a component that declares more than one.</summary>
+    /// <param name="route">The exact route template text from the matching <c>@page</c> directive.</param>
+    /// <param name="name">The member name to generate on <c>Paths</c> for that route.</param>
+    public GeneratedPathNameAttribute(string route, string name)
+    {
+        Route = route;
+        Name = name;
+    }
 }

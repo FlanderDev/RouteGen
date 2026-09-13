@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>netstandard2.0</TargetFramework>
+		<LangVersion>latest</LangVersion>
+		<Nullable>enable</Nullable>
+		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<Authors>FlanderDev</Authors>
+		<Description>Optional, temporary migration tooling for RouteGen: an Info-severity diagnostic plus a bulk-applicable code fix that reverse-engineers an attribute-routed ASP.NET Core controller into a starting-point RouteGen [ApiRoute] interface. Meant to be added while migrating an existing API onto RouteGen and removed once migration is complete — it never runs at build time in a way that affects your app, and produces a normal, editable source file, not generated-on-every-build output.</Description>
+		<PackageTags>roslyn;analyzer;codefix;migration;aspnetcore;routing;codegen</PackageTags>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<RepositoryUrl>https://github.com/FlanderDev/RouteGen</RepositoryUrl>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<DevelopmentDependency>true</DevelopmentDependency>
+		<NoWarn>NU5128</NoWarn>
+	</PropertyGroup>
+	<ItemGroup>
+		<None Include="README.md" Pack="true" PackagePath="\"/>
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\FlanderDev.RouteGen.Abstractions\FlanderDev.RouteGen.Abstractions.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+		<!-- Deliberately NOT referencing Microsoft.CodeAnalysis.CSharp.Workspaces here (RS1038):
+		     this assembly contains the DiagnosticAnalyzer, which must load in every host that loads
+		     analyzers, including lightweight/command-line-only compilation scenarios that may not
+		     provide Workspaces assemblies at all. The CodeFixProvider, which genuinely needs
+		     Workspaces (CodeAction, Solution editing), lives in the separate
+		     FlanderDev.RouteGen.Migration.CodeFixes assembly instead — packed together into this
+		     same NuGet package (see the Target below) so `dotnet add package
+		     FlanderDev.RouteGen.Migration` still gets both. -->
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.6.0" PrivateAssets="all" />
+		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="5.6.0" PrivateAssets="all" />
+	</ItemGroup>
+	<ItemGroup>
+		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+		<None Include="build\RouteGen.Migration.props" Pack="true" PackagePath="build\RouteGen.Migration.props" />
+	</ItemGroup>
+
+	<!--
+	  CodeFixes can't be a normal ProjectReference here: it references THIS project (for the shared
+	  internal reader/model/emitter types), so the reverse reference would be a build cycle. Instead,
+	  explicitly build it on demand before packing, since by this point (BeforeTargets="GenerateNuspec"
+	  runs after this project's own Build target) this project's own output already exists for
+	  CodeFixes' reference to it to resolve against.
+	-->
+	<Target Name="BuildCodeFixesForPack" BeforeTargets="GenerateNuspec">
+		<MSBuild Projects="..\FlanderDev.RouteGen.Migration.CodeFixes\FlanderDev.RouteGen.Migration.CodeFixes.csproj"
+		         Targets="Build"
+		         Properties="Configuration=$(Configuration)" />
+		<ItemGroup>
+			<None Include="..\FlanderDev.RouteGen.Migration.CodeFixes\bin\$(Configuration)\netstandard2.0\FlanderDev.RouteGen.Migration.CodeFixes.dll"
+			      Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+		</ItemGroup>
+	</Target>
+</Project>

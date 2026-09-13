@@ -21,25 +21,25 @@ public partial interface IModsApi
     [Authorize]
     Task<ModDto> Upload([Body] ModUploadDto dto);
 
-    // [Form]/[File] demonstrate multipart/form-data: ordinary form fields alongside a single
-    // required file. Not combinable with [Body] on the same method (a request has one content
-    // type) -- see RG0009.
+    // For a single file, attaching extra data alongside it is simple: just add more [Form]
+    // fields next to the [File] parameter -- no need for FileWithData<TData> here at all.
     [Post("upload-with-screenshot")]
     [Authorize]
     Task<ModDto> UploadWithScreenshot(
         [Form] string name,
-        [Form] FileInfo fileInfo,
-        [File] FormFile formFile,
+        [Form] string description,
+        [File] FormFile screenshot,
         CancellationToken ct = default);
 
-    // [File] on an IReadOnlyList<FormFile>? parameter is the multi-file form: several files
-    // under the same field name, here optional (the mod can be uploaded without a gallery).
+    // [File] on an IReadOnlyList<FileWithData<TData>>? parameter is where FileWithData<TData>
+    // actually earns its keep: several files, each with its OWN caption, correlated by field
+    // name (not by list position) -- no parallel "files" + "captions" lists to keep in sync.
     [Post("upload-with-gallery")]
     [Authorize]
     Task<ModDto> UploadWithGallery(
-        [Form] List<string> names,
-        [Form] List<FileInfo> fileInfos,
-        [File] List<FormFile> formFiles,
+        [Form] string name,
+        [Form] string description,
+        [File] IReadOnlyList<FileWithData<PhotoCaption>>? gallery,
         CancellationToken ct = default);
 
     [Delete("{id:int}")]
@@ -52,6 +52,10 @@ public enum SortBy
     Popular = 0,
     Newest = 1,
 }
+
+// The per-file data paired with each gallery photo via FileWithData<TData> -- genuinely sent to
+// and readable by the server, unlike the old FormFile<TMetadata>'s client-local-only Metadata.
+public sealed record PhotoCaption(string Caption, int SortOrder);
 
 public sealed record ModDto(int Id, string Name, string Author, int Downloads);
 
