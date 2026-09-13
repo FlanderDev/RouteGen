@@ -207,11 +207,22 @@ internal static class ClientImplementationEmitter
 
         foreach (var p in method.Parameters.Where(p => p.Kind == ParameterKind.File))
         {
+            if (p.IsFileWithData)
+        {
             if (p.IsMultiFile)
+                    EmitMultiFileWithDataPart(sb, bodyIndent, p);
+                else
+                    EmitSingleFileWithDataPart(sb, bodyIndent, p);
+            }
+            else if (p.IsMultiFile)
+            {
                 EmitMultiFilePart(sb, bodyIndent, p);
+            }
             else
+            {
                 EmitSingleFilePart(sb, bodyIndent, p);
         }
+    }
     }
 
     /// <summary>Emits the <c>StreamContent</c> part for a single-file <c>[File]</c> parameter <paramref name="p"/>, guarded by a null check when nullable.</summary>
@@ -267,6 +278,83 @@ internal static class ClientImplementationEmitter
           .Append(loopVar).AppendLine(".ContentType);");
         sb.Append(loopIndent).Append("__content.Add(").Append(partVar).Append(", \"").Append(p.Name)
           .Append("\", ").Append(loopVar).AppendLine(".FileName);");
+        sb.Append(indent).AppendLine("}");
+
+        if (p.IsNullable)
+            sb.Append(bodyIndent).AppendLine("}");
+    }
+
+    /// <summary>
+    /// Emits the file + JSON-data part pair for a single <c>[File] FileWithData&lt;TData&gt;</c>
+    /// parameter, correlated with the server's generated <c>FileWithDataBinder&lt;TData&gt;</c>
+    /// by field name: <c>{name}.file</c> and <c>{name}.data</c>.
+    /// </summary>
+    private static void EmitSingleFileWithDataPart(StringBuilder sb, string bodyIndent, ApiParameterModel p)
+    {
+        string indent = bodyIndent;
+        string nullBang = p.IsNullable ? "!" : "";
+
+        if (p.IsNullable)
+        {
+            sb.Append(bodyIndent).Append("if (").Append(p.Name).AppendLine(" is not null)");
+            sb.Append(bodyIndent).AppendLine("{");
+            indent = bodyIndent + "    ";
+        }
+
+        string partVar = "__part_" + p.Name;
+        sb.Append(indent).Append("var ").Append(partVar).Append(" = new StreamContent(")
+          .Append(p.Name).Append(nullBang).AppendLine(".File.Content);");
+        sb.Append(indent).Append("if (").Append(p.Name).Append(nullBang).AppendLine(".File.ContentType is not null)");
+        sb.Append(indent).Append("    ").Append(partVar)
+          .Append(".Headers.ContentType = new global::System.Net.Http.Headers.MediaTypeHeaderValue(")
+          .Append(p.Name).Append(nullBang).AppendLine(".File.ContentType);");
+        sb.Append(indent).Append("__content.Add(").Append(partVar).Append(", \"").Append(p.Name)
+          .Append(".file\", ").Append(p.Name).Append(nullBang).AppendLine(".File.FileName);");
+        sb.Append(indent).Append("__content.Add(new StringContent(System.Text.Json.JsonSerializer.Serialize(")
+          .Append(p.Name).Append(nullBang).Append(".Data)), \"").Append(p.Name).AppendLine(".data\");");
+
+        if (p.IsNullable)
+            sb.Append(bodyIndent).AppendLine("}");
+    }
+
+    /// <summary>
+    /// Emits one file + JSON-data part pair per item for a multi-file
+    /// <c>[File] IReadOnlyList&lt;FileWithData&lt;TData&gt;&gt;</c>-shaped parameter, correlated
+    /// with the server's generated <c>FileWithDataListBinder&lt;TData&gt;</c> by index-scoped
+    /// field name: <c>{name}[0].file</c>/<c>{name}[0].data</c>, <c>{name}[1].file</c>/
+    /// <c>{name}[1].data</c>, and so on -- never by list position alone, so a client bug that
+    /// drops or reorders an item can't silently pair the wrong data with the wrong file.
+    /// </summary>
+    private static void EmitMultiFileWithDataPart(StringBuilder sb, string bodyIndent, ApiParameterModel p)
+    {
+        string indent = bodyIndent;
+
+        if (p.IsNullable)
+        {
+            sb.Append(bodyIndent).Append("if (").Append(p.Name).AppendLine(" is not null)");
+            sb.Append(bodyIndent).AppendLine("{");
+            indent = bodyIndent + "    ";
+        }
+
+        string indexVar = "__i_" + p.Name;
+        string loopVar = "__item_" + p.Name;
+        string partVar = "__part_" + p.Name;
+
+        sb.Append(indent).Append("int ").Append(indexVar).AppendLine(" = 0;");
+        sb.Append(indent).Append("foreach (var ").Append(loopVar).Append(" in ").Append(p.Name).AppendLine(")");
+        sb.Append(indent).AppendLine("{");
+        string loopIndent = indent + "    ";
+        sb.Append(loopIndent).Append("var ").Append(partVar).Append(" = new StreamContent(")
+          .Append(loopVar).AppendLine(".File.Content);");
+        sb.Append(loopIndent).Append("if (").Append(loopVar).AppendLine(".File.ContentType is not null)");
+        sb.Append(loopIndent).Append("    ").Append(partVar)
+          .Append(".Headers.ContentType = new global::System.Net.Http.Headers.MediaTypeHeaderValue(")
+          .Append(loopVar).AppendLine(".File.ContentType);");
+        sb.Append(loopIndent).Append("__content.Add(").Append(partVar).Append(", $\"").Append(p.Name)
+          .Append("[{").Append(indexVar).Append("}].file\", ").Append(loopVar).AppendLine(".File.FileName);");
+        sb.Append(loopIndent).Append("__content.Add(new StringContent(System.Text.Json.JsonSerializer.Serialize(")
+          .Append(loopVar).Append(".Data)), $\"").Append(p.Name).Append("[{").Append(indexVar).AppendLine("}].data\");");
+        sb.Append(loopIndent).Append(indexVar).AppendLine("++;");
         sb.Append(indent).AppendLine("}");
 
         if (p.IsNullable)

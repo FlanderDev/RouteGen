@@ -122,11 +122,11 @@ internal static class RouteGenDiagnostics
     public static readonly DiagnosticDescriptor InvalidFileParameterType = new(
         id: "RG0010",
         title: "[File] parameter has an unsupported type",
-        messageFormat: "Parameter '{0}' on method '{1}' is marked [File] but has type '{2}'; [File] parameters must be FormFile/FormFile<TMetadata> (single file), an array of either, one of IEnumerable<>/ICollection<>/IList<>/IReadOnlyList<>/IReadOnlyCollection<>/List<> of either, or another concrete generic collection type with a public parameterless constructor implementing ICollection<> (optionally nullable)",
+        messageFormat: "Parameter '{0}' on method '{1}' is marked [File] but has type '{2}'; [File] parameters must be FormFile/FileWithData<TData> (single file), an array of either, one of IEnumerable<>/ICollection<>/IList<>/IReadOnlyList<>/IReadOnlyCollection<>/List<> of either, or another concrete generic collection type with a public parameterless constructor implementing ICollection<> (optionally nullable)",
         category: Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "The server mirrors the client's exact declared collection type (substituting IFormFile for FormFile), so only shapes ASP.NET Core's model binder is verified to construct without throwing at request time are accepted -- see TryGetFileParameterShape for the exact rule, checked against ModelBindingHelper.GetCompatibleCollection<T>.");
+        description: "The server mirrors the client's exact declared collection type (substituting IFormFile for FormFile, or the generated controller base's own nested FileWithData<TData> for FileWithData<TData>), so only shapes ASP.NET Core's model binder is verified to construct without throwing at request time are accepted -- see TryGetFileParameterShape for the exact rule, checked against ModelBindingHelper.GetCompatibleCollection<T>.");
 
     /// <summary>RG0011: a custom generic collection type's constraint on its element type parameter can't be satisfied by IFormFile once mirrored server-side.</summary>
     public static readonly DiagnosticDescriptor IncompatibleFileCollectionConstraint = new(

@@ -21,26 +21,25 @@ public partial interface IModsApi
     [Authorize]
     Task<ModDto> Upload([Body] ModUploadDto dto);
 
-    // [File] can be FormFile<TMetadata> instead of plain FormFile when the caller needs to
-    // attach local data to the upload -- UploadClientContext here never reaches the server (see
-    // FormFile<TMetadata>'s doc comment); it's purely for the caller's own bookkeeping around
-    // the call (e.g. correlating this upload with UI state or a retry attempt).
+    // For a single file, attaching extra data alongside it is simple: just add more [Form]
+    // fields next to the [File] parameter -- no need for FileWithData<TData> here at all.
     [Post("upload-with-screenshot")]
     [Authorize]
     Task<ModDto> UploadWithScreenshot(
         [Form] string name,
         [Form] string description,
-        [File] FormFile<UploadClientContext> screenshot,
+        [File] FormFile screenshot,
         CancellationToken ct = default);
 
-    // [File] on an IReadOnlyList<FormFile>? parameter is the multi-file form: several files
-    // under the same field name, here optional (the mod can be uploaded without a gallery).
+    // [File] on an IReadOnlyList<FileWithData<TData>>? parameter is where FileWithData<TData>
+    // actually earns its keep: several files, each with its OWN caption, correlated by field
+    // name (not by list position) -- no parallel "files" + "captions" lists to keep in sync.
     [Post("upload-with-gallery")]
     [Authorize]
     Task<ModDto> UploadWithGallery(
         [Form] string name,
         [Form] string description,
-        [File] IReadOnlyList<FormFile>? gallery,
+        [File] IReadOnlyList<FileWithData<PhotoCaption>>? gallery,
         CancellationToken ct = default);
 
     [Delete("{id:int}")]
@@ -54,9 +53,9 @@ public enum SortBy
     Newest = 1,
 }
 
-// Purely local to the client -- attached to a FormFile<TMetadata> upload but never sent to the
-// server. Any type works here; this one just happens to be a record for convenience.
-public sealed record UploadClientContext(string CorrelationId, int AttemptNumber);
+// The per-file data paired with each gallery photo via FileWithData<TData> -- genuinely sent to
+// and readable by the server, unlike the old FormFile<TMetadata>'s client-local-only Metadata.
+public sealed record PhotoCaption(string Caption, int SortOrder);
 
 public sealed record ModDto(int Id, string Name, string Author, int Downloads);
 

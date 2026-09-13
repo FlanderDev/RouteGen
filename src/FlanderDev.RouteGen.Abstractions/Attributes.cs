@@ -101,25 +101,26 @@ public sealed class BodyAttribute : Attribute { }
 public sealed class FormAttribute : Attribute { }
 
 /// <summary>
-/// Marks a parameter as one (or, for a supported collection-of-<see cref="FormFile"/>-typed
-/// parameter, several) uploaded file(s) in a <c>multipart/form-data</c> request. The parameter
-/// type must be <see cref="FormFile"/> or <see cref="FormFile{TMetadata}"/> for a single file;
-/// for multiple files it must be an array, one of <c>IEnumerable&lt;&gt;</c>/<c>ICollection&lt;&gt;</c>/
-/// <c>IList&lt;&gt;</c>/<c>IReadOnlyList&lt;&gt;</c>/<c>IReadOnlyCollection&lt;&gt;</c>/<c>List&lt;&gt;</c>
-/// of either, or another concrete generic collection type with a public parameterless constructor
-/// implementing <c>ICollection&lt;&gt;</c> (optionally nullable either way) -- see diagnostic
-/// RG0010 for any other type. This isn't an arbitrary restriction: the server mirrors whichever
-/// of these shapes the client declares, and only shapes ASP.NET Core's own model binder is
-/// verified (against its source) to construct without throwing at request time are accepted.
+/// Marks a parameter as one (or, for a supported collection-typed parameter, several) uploaded
+/// file(s) in a <c>multipart/form-data</c> request -- optionally paired with per-file data via
+/// <see cref="FileWithData{TData}"/> instead of a plain <see cref="FormFile"/>.
+/// The parameter type must be <see cref="FormFile"/> or <see cref="FileWithData{TData}"/> for a
+/// single file; for multiple files it must be an array, one of <c>IEnumerable&lt;&gt;</c>/
+/// <c>ICollection&lt;&gt;</c>/<c>IList&lt;&gt;</c>/<c>IReadOnlyList&lt;&gt;</c>/
+/// <c>IReadOnlyCollection&lt;&gt;</c>/<c>List&lt;&gt;</c> of either, or another concrete generic
+/// collection type with a public parameterless constructor implementing <c>ICollection&lt;&gt;</c>
+/// (optionally nullable either way) -- see diagnostic RG0010 for any other type. This isn't an
+/// arbitrary restriction: the server mirrors whichever of these shapes the client declares, and
+/// only shapes ASP.NET Core's own model binder is verified (against its source) to construct
+/// without throwing at request time are accepted.
 /// Combine with <see cref="FormAttribute"/> parameters for accompanying form fields; not
 /// combinable with <see cref="BodyAttribute"/> on the same method (RG0009).
-/// Server-side a single file becomes <c>[FromForm] IFormFile</c>, and multiple files become
-/// <c>[FromForm]</c> over the same collection shape the client declared, with <c>IFormFile</c>
-/// substituted for <c>FormFile</c> -- this is unaffected by whether the client declared
-/// <see cref="FormFile"/> or <see cref="FormFile{TMetadata}"/>, since <c>TMetadata</c> never
-/// leaves the client. Client-side, the generated implementation adds each file's
-/// <see cref="FormFile.Content"/> stream to the request as a file part under the same field name,
-/// using <see cref="FormFile.FileName"/> and <see cref="FormFile.ContentType"/>.
+/// A plain <see cref="FormFile"/> becomes <c>[FromForm] IFormFile</c> server-side, over the same
+/// collection shape the client declared for the multi-file case. A
+/// <see cref="FileWithData{TData}"/> (or a collection of them) instead becomes the generated
+/// controller base's own nested <c>FileWithData&lt;TData&gt;</c> record, reconstructed by a
+/// generated model binder from the file and its JSON-serialized data -- correlated by field name
+/// (e.g. <c>photos[0].file</c> / <c>photos[0].data</c>), not by list position.
 /// </summary>
 [AttributeUsage(AttributeTargets.Parameter, Inherited = false, AllowMultiple = false)]
 public sealed class FileAttribute : Attribute { }

@@ -184,15 +184,27 @@ internal sealed class ApiParameterModel(string name, string typeFullName)
     /// <summary>
     /// True when a <see cref="ParameterKind.File"/> parameter is the multi-file form
     /// (any accepted collection shape, optionally nullable) rather than a single
-    /// <c>FormFile</c>. Unused for every other <see cref="ParameterKind"/>.
+    /// <c>FormFile</c>/<c>FileWithData&lt;TData&gt;</c>. Unused for every other <see cref="ParameterKind"/>.
     /// </summary>
     public bool IsMultiFile { get; set; }
 
     /// <summary>
-    /// For a <see cref="ParameterKind.File"/> parameter, the fully-qualified server-side type to
-    /// generate: the same shape as <see cref="TypeFullName"/> (single value, array, or a
-    /// verified-bindable collection type) with <c>IFormFile</c> substituted for
-    /// <c>FormFile</c>/<c>FormFile&lt;TMetadata&gt;</c>. Null for every other
+    /// True when a <see cref="ParameterKind.File"/> parameter is (or is a collection of)
+    /// <see cref="FlanderDev.RouteGen.Abstractions.FileWithData{TData}"/> rather than a plain
+    /// <c>FormFile</c>. Drives both emitters toward the paired file+data codegen path (indexed
+    /// field-name correlation, a generated model binder) instead of the plain-file path.
+    /// </summary>
+    public bool IsFileWithData { get; set; }
+
+    /// <summary>The fully-qualified <c>TData</c> type argument, when <see cref="IsFileWithData"/> is true; otherwise null.</summary>
+    public string? FileWithDataTypeFullName { get; set; }
+
+    /// <summary>
+    /// For a <see cref="ParameterKind.File"/> parameter, the server-side type to generate: the
+    /// same shape as <see cref="TypeFullName"/> (single value, array, or a verified-bindable
+    /// collection type) with <c>IFormFile</c> substituted for <c>FormFile</c>, or the generated
+    /// controller base's own nested <c>FileWithData&lt;TData&gt;</c> substituted for
+    /// <see cref="FlanderDev.RouteGen.Abstractions.FileWithData{TData}"/>. Null for every other
     /// <see cref="ParameterKind"/>.
     /// </summary>
     public string? ServerFileTypeFullName { get; set; }

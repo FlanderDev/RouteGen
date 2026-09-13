@@ -249,9 +249,14 @@ internal static class ApiInterfaceReader
             {
                 paramModel.Kind = ParameterKind.File;
 
-                if (TryGetFileParameterShape(paramType, formFileType, out bool isMultiFile, out string? serverTypeFullName, out string? constraintIssue))
+                if (TryGetFileParameterShape(
+                        paramType, formFileType,
+                        out bool isMultiFile, out bool isFileWithData, out string? fileWithDataTypeFullName,
+                        out string? serverTypeFullName, out string? constraintIssue))
                 {
                     paramModel.IsMultiFile = isMultiFile;
+                    paramModel.IsFileWithData = isFileWithData;
+                    paramModel.FileWithDataTypeFullName = fileWithDataTypeFullName;
 
                     if (constraintIssue is not null)
                     {
@@ -381,13 +386,14 @@ internal static class ApiInterfaceReader
 
     /// <summary>
     /// True when <paramref name="type"/> is a valid <c>[File]</c> parameter shape, in which case
-    /// <paramref name="serverTypeFullName"/> is the exact fully-qualified server-side type to
-    /// generate (the same shape as <paramref name="type"/>, with <c>IFormFile</c> substituted for
-    /// <c>FormFile</c>/<c>FormFile&lt;TMetadata&gt;</c>).
+    /// <paramref name="serverTypeFullName"/> is the exact server-side type to generate (the same
+    /// shape as <paramref name="type"/>, with <c>IFormFile</c> substituted for <c>FormFile</c>,
+    /// or the generated controller base's own nested <c>FileWithData&lt;TData&gt;</c> substituted
+    /// for <c>FileWithData&lt;TData&gt;</c>).
     ///
-    /// A single file is always safe. For multiple files, only shapes ASP.NET Core's own model
-    /// binder is verified to construct without throwing are accepted -- confirmed against
-    /// <c>ModelBindingHelper.GetCompatibleCollection&lt;T&gt;</c>
+    /// A single file (or file+data pair) is always safe. For multiple files, only shapes ASP.NET
+    /// Core's own model binder is verified to construct without throwing are accepted -- confirmed
+    /// against <c>ModelBindingHelper.GetCompatibleCollection&lt;T&gt;</c>
     /// (https://github.com/dotnet/aspnetcore/blob/main/src/Mvc/Mvc.Core/src/ModelBinding/ModelBindingHelper.cs),
     /// which the framework's own <c>FormFileModelBinder</c> uses for every multi-file parameter:
     ///   - <c>T[]</c> -- always works (a <c>List&lt;T&gt;</c> is bound, then copied to an array).
@@ -396,16 +402,22 @@ internal static class ApiInterfaceReader
     ///     itself -- always works (a <c>List&lt;T&gt;</c> is bound and assigned directly, since
     ///     <c>List&lt;T&gt;</c> is assignable to every one of these).
     ///   - Any OTHER concrete, non-abstract, generic collection class closed over
-    ///     <c>FormFile</c>/<c>FormFile&lt;TMetadata&gt;</c> -- works ONLY if it has an accessible
-    ///     public parameterless constructor AND implements <c>ICollection&lt;T&gt;</c>, since the
-    ///     binder falls back to <c>(ICollection&lt;T&gt;)Activator.CreateInstance(modelType)</c>
-    ///     for anything that isn't one of the shapes above. Types that satisfy
-    ///     <c>ICollection&lt;T&gt;</c> assignability but lack a public parameterless constructor
-    ///     (e.g. <c>ImmutableList&lt;T&gt;</c>, which has no public constructor at all) pass
-    ///     ASP.NET Core's own <c>CanGetCompatibleCollection&lt;T&gt;</c> check but then throw
+    ///     <c>FormFile</c> -- works ONLY if it has an accessible public parameterless constructor
+    ///     AND implements <c>ICollection&lt;T&gt;</c>, since the binder falls back to
+    ///     <c>(ICollection&lt;T&gt;)Activator.CreateInstance(modelType)</c> for anything that
+    ///     isn't one of the shapes above. Types that satisfy <c>ICollection&lt;T&gt;</c>
+    ///     assignability but lack a public parameterless constructor (e.g. <c>ImmutableList&lt;T&gt;</c>,
+    ///     which has no public constructor at all) pass ASP.NET Core's own
+    ///     <c>CanGetCompatibleCollection&lt;T&gt;</c> check but then throw
     ///     <c>MissingMethodException</c> from <c>GetCompatibleCollection&lt;T&gt;</c> at request
     ///     time -- RouteGen checks the constructor explicitly so this fails at compile time
-    ///     instead, as RG0010, rather than reproducing that runtime landmine.
+    ///     instead, as RG0010, rather than reproducing that runtime landmine. This custom-collection
+    ///     path applies identically whether the element type is <c>FormFile</c> or
+    ///     <c>FileWithData&lt;TData&gt;</c>, EXCEPT the RG0011 generic-constraint check (see
+    ///     <see cref="TryFindIncompatibleConstraint"/>), which only runs for a <c>FormFile</c>
+    ///     element -- extending it to a <c>FileWithData&lt;TData&gt;</c> element (a custom
+    ///     collection AND a paired-data file AND an incompatible generic constraint, all at once)
+    ///     was judged too narrow an edge case to justify the added complexity for v1.
     ///   - A non-generic concrete collection type hardcoded to a <c>FormFile</c> element type
     ///     (e.g. a hand-written <c>class Gallery : List&lt;FormFile&gt;</c>) can never be
     ///     mirrored -- there is no way to construct an analogous type closed over <c>IFormFile</c>
@@ -415,33 +427,71 @@ internal static class ApiInterfaceReader
         ITypeSymbol type,
         INamedTypeSymbol? formFileType,
         out bool isMultiFile,
+        out bool isFileWithData,
+        out string? fileWithDataTypeFullName,
         out string? serverTypeFullName,
         out string? constraintIncompatibilityReason)
     {
-        const string ServerElementType = "global::Microsoft.AspNetCore.Http.IFormFile";
+        const string FormFileServerType = "global::Microsoft.AspNetCore.Http.IFormFile";
 
         isMultiFile = false;
+        isFileWithData = false;
+        fileWithDataTypeFullName = null;
         serverTypeFullName = null;
         constraintIncompatibilityReason = null;
 
+        // Single element (not a collection): FormFile or FileWithData<TData>.
         if (IsFormFileType(type))
         {
-            serverTypeFullName = ServerElementType;
+            serverTypeFullName = FormFileServerType;
             return true;
         }
 
-        if (type is IArrayTypeSymbol arrayType && IsFormFileType(arrayType.ElementType))
+        if (IsFileWithDataType(type, out var singleDataType))
         {
-            isMultiFile = true;
-            serverTypeFullName = ServerElementType + "[]";
+            isFileWithData = true;
+            fileWithDataTypeFullName = singleDataType!.ToDisplayString(FullyQualified);
+            serverTypeFullName = "FileWithData<" + fileWithDataTypeFullName + ">";
             return true;
         }
 
-        if (type is INamedTypeSymbol { IsGenericType: true, TypeArguments.Length: 1 } named &&
-            IsFormFileType(named.TypeArguments[0]))
+        ITypeSymbol? elementType = type switch
         {
+            IArrayTypeSymbol array => array.ElementType,
+            INamedTypeSymbol { IsGenericType: true, TypeArguments.Length: 1 } named => named.TypeArguments[0],
+            _ => null
+        };
+
+        if (elementType is null) return false;
+
+        bool elementIsFormFile = IsFormFileType(elementType);
+        bool elementIsFileWithDataType = IsFileWithDataType(elementType, out var collectionDataType);
+        bool elementIsFileWithData = !elementIsFormFile && elementIsFileWithDataType;
+
+        if (!elementIsFormFile && !elementIsFileWithData) return false;
+
             isMultiFile = true;
-            string containerName = "global::" + named.ContainingNamespace.ToDisplayString() + "." + named.Name;
+        isFileWithData = elementIsFileWithData;
+
+        string elementServerType;
+        if (elementIsFormFile)
+        {
+            elementServerType = FormFileServerType;
+        }
+        else
+        {
+            fileWithDataTypeFullName = collectionDataType!.ToDisplayString(FullyQualified);
+            elementServerType = "FileWithData<" + fileWithDataTypeFullName + ">";
+        }
+
+        if (type is IArrayTypeSymbol)
+        {
+            serverTypeFullName = elementServerType + "[]";
+            return true;
+        }
+
+        var namedCollection = (INamedTypeSymbol)type;
+        string containerName = "global::" + namedCollection.ContainingNamespace.ToDisplayString() + "." + namedCollection.Name;
 
             // Namespace-checked, not just simple-name-checked: a user's own type coincidentally
             // named e.g. "List" or "IReadOnlyList" in some other namespace is NOT guaranteed
@@ -449,42 +499,42 @@ internal static class ApiInterfaceReader
             // go through the constructor/ICollection<T> verification below like any other custom
             // collection type.
             bool isListAssignableShape =
-                named.ContainingNamespace?.ToDisplayString() == "System.Collections.Generic" &&
-                named.Name is "List" or "IEnumerable" or "ICollection" or "IList" or "IReadOnlyCollection" or "IReadOnlyList";
+            namedCollection.ContainingNamespace?.ToDisplayString() == "System.Collections.Generic" &&
+            namedCollection.Name is "List" or "IEnumerable" or "ICollection" or "IList" or "IReadOnlyCollection" or "IReadOnlyList";
 
             if (isListAssignableShape)
             {
-                serverTypeFullName = containerName + "<" + ServerElementType + ">";
+            serverTypeFullName = containerName + "<" + elementServerType + ">";
                 return true;
             }
 
             // Anything else: only safe if ASP.NET Core can actually Activator.CreateInstance it
             // and treat it as an ICollection<T> -- see the constructor/interface checks below.
-            bool hasPublicParameterlessCtor = named.InstanceConstructors
+        bool hasPublicParameterlessCtor = namedCollection.InstanceConstructors
                 .Any(c => c.Parameters.IsEmpty && c.DeclaredAccessibility == Accessibility.Public);
-            bool implementsMatchingICollection = named.AllInterfaces.Any(i =>
+        bool implementsMatchingICollection = namedCollection.AllInterfaces.Any(i =>
                 i is { Name: "ICollection", IsGenericType: true, TypeArguments.Length: 1 } &&
-                IsFormFileType(i.TypeArguments[0]));
+            (elementIsFormFile ? IsFormFileType(i.TypeArguments[0]) : IsFileWithDataType(i.TypeArguments[0], out _)));
 
-            if (named.TypeKind == TypeKind.Class && !named.IsAbstract &&
+        if (namedCollection.TypeKind == TypeKind.Class && !namedCollection.IsAbstract &&
                 hasPublicParameterlessCtor && implementsMatchingICollection)
             {
                 // RG0011: even though the shape is otherwise valid, substituting IFormFile in for
                 // this custom collection's type parameter could still be an invalid closed generic
                 // type server-side (e.g. a plausible `where T : FormFile` constraint) -- only
-                // checked when IFormFile itself is resolvable (the server compilation); see this
-                // parameter's own doc comment on why that's the right compilation to check in.
-                if (formFileType is not null)
-                    TryFindIncompatibleConstraint(named, formFileType, out constraintIncompatibilityReason);
+            // checked when IFormFile itself is resolvable (the server compilation) and only for
+            // a FormFile element (see this method's own doc comment for why FileWithData<TData>
+            // elements skip this check for now).
+            if (elementIsFormFile && formFileType is not null)
+                TryFindIncompatibleConstraint(namedCollection, formFileType, out constraintIncompatibilityReason);
 
-                serverTypeFullName = containerName + "<" + ServerElementType + ">";
+            serverTypeFullName = containerName + "<" + elementServerType + ">";
             return true;
         }
 
             isMultiFile = false;
-            return false;
-        }
-
+        isFileWithData = false;
+        fileWithDataTypeFullName = null;
         return false;
     }
 
@@ -535,10 +585,24 @@ internal static class ApiInterfaceReader
         return false;
     }
 
-    /// <summary>True when <paramref name="type"/> is <see cref="FormFile"/> or a closed <see cref="FormFile{TMetadata}"/>.</summary>
+    /// <summary>True when <paramref name="type"/> is (specifically) <see cref="FlanderDev.RouteGen.Abstractions.FormFile"/>, not any other type that happens to share its name.</summary>
     private static bool IsFormFileType(ITypeSymbol type) =>
-        type is INamedTypeSymbol { Name: "FormFile", Arity: 0 or 1 } named &&
+        type is INamedTypeSymbol { Name: "FormFile", Arity: 0 } named &&
         named.ContainingNamespace?.ToDisplayString() == "FlanderDev.RouteGen.Abstractions";
+
+    /// <summary>True when <paramref name="type"/> is a closed <see cref="FlanderDev.RouteGen.Abstractions.FileWithData{TData}"/>, in which case <paramref name="dataType"/> is its <c>TData</c> type argument.</summary>
+    private static bool IsFileWithDataType(ITypeSymbol type, out ITypeSymbol? dataType)
+    {
+        if (type is INamedTypeSymbol { Name: "FileWithData", Arity: 1 } named &&
+            named.ContainingNamespace?.ToDisplayString() == "FlanderDev.RouteGen.Abstractions")
+        {
+            dataType = named.TypeArguments[0];
+            return true;
+        }
+
+        dataType = null;
+        return false;
+    }
 
     /// <summary>
     /// True when <paramref name="type"/> can hold null at runtime: a nullable reference type, a
@@ -625,7 +689,6 @@ internal static class ApiInterfaceReader
         }
     }
 
-    /// <summary>True when <paramref name="attributeType"/> is (or is named like) <paramref name="simpleName"/>, tolerating attributes from any namespace.</summary>
     /// <summary>
     /// True when <paramref name="attributeType"/> is the RouteGen attribute named
     /// <paramref name="simpleName"/> specifically -- i.e. it also lives in

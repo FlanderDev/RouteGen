@@ -9,7 +9,7 @@ public interface IModsService
     Task<ModDto?> GetMod(int id);
     Task<ModDto> Upload(ModUploadDto dto);
     Task<ModDto> UploadWithScreenshot(string name, string description, IFormFile screenshot);
-    Task<ModDto> UploadWithGallery(string name, string description, IReadOnlyList<IFormFile>? gallery);
+    Task<ModDto> UploadWithGallery(string name, string description, IReadOnlyList<ModsApiControllerBase.FileWithData<PhotoCaption>>? gallery);
     Task<bool> Delete(int id);
 }
 
@@ -58,8 +58,11 @@ public sealed class InMemoryModsService : IModsService
         return Task.FromResult(mod);
     }
 
-    public Task<ModDto> UploadWithGallery(string name, string description, IReadOnlyList<IFormFile>? gallery)
+    public Task<ModDto> UploadWithGallery(string name, string description, IReadOnlyList<ModsApiControllerBase.FileWithData<PhotoCaption>>? gallery)
     {
+        // Each item's own .Data (PhotoCaption) travels with its .File -- no separate parallel
+        // list of captions to zip back up by index, and no risk of a dropped/reordered file
+        // silently pairing the wrong caption with the wrong photo.
         var mod = new ModDto(_mods.Count + 1, name, "you", 0);
         _mods.Add(mod);
         return Task.FromResult(mod);
