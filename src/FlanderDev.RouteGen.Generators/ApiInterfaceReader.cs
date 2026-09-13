@@ -12,11 +12,13 @@ namespace FlanderDev.RouteGen.Generators;
 /// </summary>
 internal static class ApiInterfaceReader
 {
+    /// <summary>Symbol display format producing fully-qualified, nullable-annotation-aware type names for generated code.</summary>
     private static readonly SymbolDisplayFormat FullyQualified =
         SymbolDisplayFormat.FullyQualifiedFormat.WithMiscellaneousOptions(
             SymbolDisplayMiscellaneousOptions.UseSpecialTypes |
             SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
+    /// <summary>Special types considered safe to bind from a route segment or query string.</summary>
     private static readonly HashSet<SpecialType> SimpleSpecialTypes =
     [
         SpecialType.System_String, SpecialType.System_Boolean, SpecialType.System_Byte,
@@ -26,8 +28,22 @@ internal static class ApiInterfaceReader
         SpecialType.System_Decimal, SpecialType.System_Char,
     ];
 
+    /// <summary>
+    /// Parses <paramref name="interfaceSymbol"/> into an <see cref="ApiInterfaceModel"/>, or
+    /// returns null if it isn't <see cref="ApiRouteAttribute"/>-decorated. Reports any RouteGen
+    /// diagnostics found along the way into <paramref name="diagnostics"/>.
+    /// </summary>
+    /// <param name="interfaceSymbol">The candidate interface symbol.</param>
+    /// <param name="formFileType">
+    /// The resolved <c>Microsoft.AspNetCore.Http.IFormFile</c> symbol, when available (i.e. this
+    /// is the server compilation). Used only for RG0011's generic-constraint check on custom
+    /// <c>[File]</c> collection types; pass null (e.g. from Shared/Client, which have no ASP.NET
+    /// Core reference at all) to skip that specific check rather than guess at it.
+    /// </param>
+    /// <param name="diagnostics">Diagnostics discovered while parsing are appended here.</param>
     public static ApiInterfaceModel? TryParse(
         INamedTypeSymbol interfaceSymbol,
+        INamedTypeSymbol? formFileType,
         List<Diagnostic> diagnostics)
     {
         var apiRouteAttr = interfaceSymbol.GetAttributes()
@@ -61,7 +77,7 @@ internal static class ApiInterfaceReader
         {
             if (member.MethodKind != MethodKind.Ordinary) continue;
 
-            var methodModel = ParseMethod(member, model, diagnostics);
+            var methodModel = ParseMethod(member, model, formFileType, diagnostics);
             if (methodModel is not null)
                 model.Methods.Add(methodModel);
         }
@@ -70,9 +86,11 @@ internal static class ApiInterfaceReader
         return model;
     }
 
+    /// <summary>Reads and validates every attribute/parameter on an interface method, or returns null if it isn't an HTTP-verb-attributed operation.</summary>
     private static ApiMethodModel? ParseMethod(
         IMethodSymbol method,
         ApiInterfaceModel owner,
+        INamedTypeSymbol? formFileType,
         List<Diagnostic> diagnostics)
     {
         HttpVerbInfo? verbInfo = null;
@@ -163,6 +181,7 @@ internal static class ApiInterfaceReader
                 paramType.ToDisplayString(FullyQualified))
             {
                 IsNullable = IsNullableType(paramType, param),
+                IsCultureSensitive = IsCultureSensitiveType(paramType),
                 HasDefaultValue = param.HasExplicitDefaultValue,
                 DefaultValueLiteral = param.HasExplicitDefaultValue ? FormatDefault(param) : null,
             };
@@ -230,9 +249,29 @@ internal static class ApiInterfaceReader
             {
                 paramModel.Kind = ParameterKind.File;
 
-                if (TryGetFileParameterShape(paramType, out bool isMultiFile))
+                if (TryGetFileParameterShape(paramType, formFileType, out bool isMultiFile, out string? serverTypeFullName, out string? constraintIssue))
                 {
                     paramModel.IsMultiFile = isMultiFile;
+
+                    if (constraintIssue is not null)
+                    {
+                        diagnostics.Add(Diagnostic.Create(
+                            RouteGenDiagnostics.IncompatibleFileCollectionConstraint,
+                            GetLocation(param),
+                            param.Name,
+                            method.Name,
+                            paramType.ToDisplayString(),
+                            constraintIssue));
+
+                        // Same "one clean diagnostic, no cascading raw compiler error" principle
+                        // as the RG0010 fallback just below: don't emit the (invalid) mirrored
+                        // type, echo back the client type instead.
+                        paramModel.ServerFileTypeFullName = paramModel.TypeFullName;
+                    }
+                    else
+                    {
+                        paramModel.ServerFileTypeFullName = serverTypeFullName;
+                    }
                 }
                 else
                 {
@@ -242,6 +281,13 @@ internal static class ApiInterfaceReader
                         param.Name,
                         method.Name,
                         paramType.ToDisplayString()));
+
+                    // RG0010 above already fails the build with a clear message; still fall back
+                    // to a syntactically valid (if semantically wrong) server type here, echoing
+                    // back exactly the type the interface declared, so the invalid [File]
+                    // parameter doesn't ALSO surface a second, confusing raw syntax error (an
+                    // empty/missing parameter type) alongside the one clear diagnostic.
+                    paramModel.ServerFileTypeFullName = paramModel.TypeFullName;
                 }
             }
             else if (isForm)
@@ -300,45 +346,206 @@ internal static class ApiInterfaceReader
                 method.Name));
         }
 
+        AssignCancellationTokenDefault(methodModel);
+
         return methodModel;
     }
 
     /// <summary>
-    /// Determines whether a type is a valid <see cref="FileAttribute"/> parameter type: either a
-    /// single <c>FormFile</c>, or a list-like collection of them (<c>IReadOnlyList&lt;FormFile&gt;</c>,
-    /// <c>IEnumerable&lt;FormFile&gt;</c>, <c>IList&lt;FormFile&gt;</c>, <c>List&lt;FormFile&gt;</c>,
-    /// <c>ICollection&lt;FormFile&gt;</c>, or <c>FormFile[]</c>), optionally nullable either way
-    /// (nullability itself is tracked separately via <see cref="IsNullableType"/>).
+    /// Gives a <see cref="ParameterKind.CancellationToken"/> parameter a <c>= default</c> value
+    /// -- but only when doing so can't push some later, still-required parameter into an invalid
+    /// "required after optional" position (CS1737). Scans right to left so the decision accounts
+    /// for every parameter that follows, not just the immediate next one; a CancellationToken
+    /// with a genuinely required parameter after it (itself already legal C#, since neither has
+    /// a default) is left exactly as declared, so the generated signature's ordering always
+    /// matches an ordering the interface method itself already legally compiled with.
     /// </summary>
-    private static bool TryGetFileParameterShape(ITypeSymbol type, out bool isMultiFile)
+    private static void AssignCancellationTokenDefault(ApiMethodModel methodModel)
     {
+        bool trailingRequired = false;
+
+        for (int i = methodModel.Parameters.Count - 1; i >= 0; i--)
+        {
+            var p = methodModel.Parameters[i];
+
+            if (p.Kind == ParameterKind.CancellationToken && !trailingRequired && !p.HasDefaultValue)
+            {
+                p.HasDefaultValue = true;
+                p.DefaultValueLiteral = "default";
+            }
+
+            if (!p.HasDefaultValue)
+                trailingRequired = true;
+        }
+    }
+
+    /// <summary>
+    /// True when <paramref name="type"/> is a valid <c>[File]</c> parameter shape, in which case
+    /// <paramref name="serverTypeFullName"/> is the exact fully-qualified server-side type to
+    /// generate (the same shape as <paramref name="type"/>, with <c>IFormFile</c> substituted for
+    /// <c>FormFile</c>/<c>FormFile&lt;TMetadata&gt;</c>).
+    ///
+    /// A single file is always safe. For multiple files, only shapes ASP.NET Core's own model
+    /// binder is verified to construct without throwing are accepted -- confirmed against
+    /// <c>ModelBindingHelper.GetCompatibleCollection&lt;T&gt;</c>
+    /// (https://github.com/dotnet/aspnetcore/blob/main/src/Mvc/Mvc.Core/src/ModelBinding/ModelBindingHelper.cs),
+    /// which the framework's own <c>FormFileModelBinder</c> uses for every multi-file parameter:
+    ///   - <c>T[]</c> -- always works (a <c>List&lt;T&gt;</c> is bound, then copied to an array).
+    ///   - Any of <c>IEnumerable&lt;T&gt;</c>, <c>ICollection&lt;T&gt;</c>, <c>IList&lt;T&gt;</c>,
+    ///     <c>IReadOnlyCollection&lt;T&gt;</c>, <c>IReadOnlyList&lt;T&gt;</c>, or <c>List&lt;T&gt;</c>
+    ///     itself -- always works (a <c>List&lt;T&gt;</c> is bound and assigned directly, since
+    ///     <c>List&lt;T&gt;</c> is assignable to every one of these).
+    ///   - Any OTHER concrete, non-abstract, generic collection class closed over
+    ///     <c>FormFile</c>/<c>FormFile&lt;TMetadata&gt;</c> -- works ONLY if it has an accessible
+    ///     public parameterless constructor AND implements <c>ICollection&lt;T&gt;</c>, since the
+    ///     binder falls back to <c>(ICollection&lt;T&gt;)Activator.CreateInstance(modelType)</c>
+    ///     for anything that isn't one of the shapes above. Types that satisfy
+    ///     <c>ICollection&lt;T&gt;</c> assignability but lack a public parameterless constructor
+    ///     (e.g. <c>ImmutableList&lt;T&gt;</c>, which has no public constructor at all) pass
+    ///     ASP.NET Core's own <c>CanGetCompatibleCollection&lt;T&gt;</c> check but then throw
+    ///     <c>MissingMethodException</c> from <c>GetCompatibleCollection&lt;T&gt;</c> at request
+    ///     time -- RouteGen checks the constructor explicitly so this fails at compile time
+    ///     instead, as RG0010, rather than reproducing that runtime landmine.
+    ///   - A non-generic concrete collection type hardcoded to a <c>FormFile</c> element type
+    ///     (e.g. a hand-written <c>class Gallery : List&lt;FormFile&gt;</c>) can never be
+    ///     mirrored -- there is no way to construct an analogous type closed over <c>IFormFile</c>
+    ///     instead, so these are always rejected (RG0010).
+    /// </summary>
+    private static bool TryGetFileParameterShape(
+        ITypeSymbol type,
+        INamedTypeSymbol? formFileType,
+        out bool isMultiFile,
+        out string? serverTypeFullName,
+        out string? constraintIncompatibilityReason)
+    {
+        const string ServerElementType = "global::Microsoft.AspNetCore.Http.IFormFile";
+
         isMultiFile = false;
+        serverTypeFullName = null;
+        constraintIncompatibilityReason = null;
 
         if (IsFormFileType(type))
+        {
+            serverTypeFullName = ServerElementType;
             return true;
+        }
 
         if (type is IArrayTypeSymbol arrayType && IsFormFileType(arrayType.ElementType))
         {
             isMultiFile = true;
+            serverTypeFullName = ServerElementType + "[]";
             return true;
         }
 
-        if (type is INamedTypeSymbol { IsGenericType: true } named &&
-            named.TypeArguments.Length == 1 &&
-            IsFormFileType(named.TypeArguments[0]) &&
-            named.Name is "IReadOnlyList" or "IEnumerable" or "IList" or "List"
-                or "ICollection" or "IReadOnlyCollection")
+        if (type is INamedTypeSymbol { IsGenericType: true, TypeArguments.Length: 1 } named &&
+            IsFormFileType(named.TypeArguments[0]))
         {
             isMultiFile = true;
+            string containerName = "global::" + named.ContainingNamespace.ToDisplayString() + "." + named.Name;
+
+            // Namespace-checked, not just simple-name-checked: a user's own type coincidentally
+            // named e.g. "List" or "IReadOnlyList" in some other namespace is NOT guaranteed
+            // assignable the way the real System.Collections.Generic shapes are, and must instead
+            // go through the constructor/ICollection<T> verification below like any other custom
+            // collection type.
+            bool isListAssignableShape =
+                named.ContainingNamespace?.ToDisplayString() == "System.Collections.Generic" &&
+                named.Name is "List" or "IEnumerable" or "ICollection" or "IList" or "IReadOnlyCollection" or "IReadOnlyList";
+
+            if (isListAssignableShape)
+            {
+                serverTypeFullName = containerName + "<" + ServerElementType + ">";
+                return true;
+            }
+
+            // Anything else: only safe if ASP.NET Core can actually Activator.CreateInstance it
+            // and treat it as an ICollection<T> -- see the constructor/interface checks below.
+            bool hasPublicParameterlessCtor = named.InstanceConstructors
+                .Any(c => c.Parameters.IsEmpty && c.DeclaredAccessibility == Accessibility.Public);
+            bool implementsMatchingICollection = named.AllInterfaces.Any(i =>
+                i is { Name: "ICollection", IsGenericType: true, TypeArguments.Length: 1 } &&
+                IsFormFileType(i.TypeArguments[0]));
+
+            if (named.TypeKind == TypeKind.Class && !named.IsAbstract &&
+                hasPublicParameterlessCtor && implementsMatchingICollection)
+            {
+                // RG0011: even though the shape is otherwise valid, substituting IFormFile in for
+                // this custom collection's type parameter could still be an invalid closed generic
+                // type server-side (e.g. a plausible `where T : FormFile` constraint) -- only
+                // checked when IFormFile itself is resolvable (the server compilation); see this
+                // parameter's own doc comment on why that's the right compilation to check in.
+                if (formFileType is not null)
+                    TryFindIncompatibleConstraint(named, formFileType, out constraintIncompatibilityReason);
+
+                serverTypeFullName = containerName + "<" + ServerElementType + ">";
             return true;
+        }
+
+            isMultiFile = false;
+            return false;
         }
 
         return false;
     }
 
-    private static bool IsFormFileType(ITypeSymbol type) =>
-        type is INamedTypeSymbol { Name: "FormFile" };
+    /// <summary>
+    /// Checks whether <paramref name="formFileType"/> (IFormFile) would actually satisfy the
+    /// generic constraints on <paramref name="named"/>'s (single) type parameter. A plausible
+    /// <c>where T : FormFile</c> on a custom collection type would make the mirrored
+    /// <c>MyBag&lt;IFormFile&gt;</c> an invalid closed generic type -- without this check, that
+    /// would surface as a confusing raw generic-constraint compiler error in the generated server
+    /// file, rather than a clear, RouteGen-specific diagnostic (RG0011) pointing at the actual
+    /// interface method that declared the incompatible <c>[File]</c> parameter.
+    /// </summary>
+    private static bool TryFindIncompatibleConstraint(
+        INamedTypeSymbol named, INamedTypeSymbol formFileType, out string? reason)
+    {
+        reason = null;
+        var typeParam = named.OriginalDefinition.TypeParameters.FirstOrDefault();
+        if (typeParam is null) return false;
 
+        if (typeParam.HasValueTypeConstraint)
+        {
+            reason = "a value-type constraint ('struct'), which the interface IFormFile can never satisfy";
+            return true;
+        }
+
+        if (typeParam.HasConstructorConstraint)
+        {
+            reason = "a constructor constraint ('new()'), which the interface IFormFile can never satisfy";
+            return true;
+        }
+
+        foreach (var constraintType in typeParam.ConstraintTypes)
+        {
+            if (constraintType.SpecialType == SpecialType.System_Object) continue;
+
+            bool satisfied =
+                SymbolEqualityComparer.Default.Equals(constraintType, formFileType) ||
+                formFileType.AllInterfaces.Contains(constraintType, SymbolEqualityComparer.Default);
+
+            if (!satisfied)
+            {
+                reason = "a 'where T : " + constraintType.ToDisplayString() +
+                    "' constraint, which the interface IFormFile does not satisfy";
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>True when <paramref name="type"/> is <see cref="FormFile"/> or a closed <see cref="FormFile{TMetadata}"/>.</summary>
+    private static bool IsFormFileType(ITypeSymbol type) =>
+        type is INamedTypeSymbol { Name: "FormFile", Arity: 0 or 1 } named &&
+        named.ContainingNamespace?.ToDisplayString() == "FlanderDev.RouteGen.Abstractions";
+
+    /// <summary>
+    /// True when <paramref name="type"/> can hold null at runtime: a nullable reference type, a
+    /// nullable value type (<c>Nullable&lt;T&gt;</c>), or -- defensively, since <c>default</c>
+    /// means null for those two cases just as much as it means zero for a plain value type -- a
+    /// parameter whose declared default value is literally null.
+    /// </summary>
     private static bool IsNullableType(ITypeSymbol type, IParameterSymbol? param)
     {
         if (type.NullableAnnotation == NullableAnnotation.Annotated)
@@ -353,6 +560,43 @@ internal static class ApiInterfaceReader
         return false;
     }
 
+    /// <summary>
+    /// True when <paramref name="type"/> (unwrapping <c>Nullable&lt;T&gt;</c> first) formats
+    /// differently depending on the current thread's culture: every numeric type, plus
+    /// DateTime/DateTimeOffset/TimeSpan/DateOnly/TimeOnly. Deliberately excludes string, bool,
+    /// char, Guid, and enum -- none of those are meaningfully culture-sensitive (Guid's format is
+    /// fixed regardless of culture; the others either have no culture-aware ToString overload at
+    /// all, or their output doesn't vary by culture). The client emitter uses this to decide
+    /// whether a value's ToString() call needs an explicit CultureInfo.InvariantCulture: without
+    /// it, a value like 3.14m or a DateTime formats using the calling machine's OS locale, which
+    /// may not match what the server's (invariant-culture-by-default) model binder expects --
+    /// silently binding the wrong value, or failing to bind at all, depending entirely on the
+    /// client's locale rather than anything under the API's control.
+    /// </summary>
+    private static bool IsCultureSensitiveType(ITypeSymbol type)
+    {
+        var underlying = type;
+
+        if (underlying is INamedTypeSymbol { Name: "Nullable", IsGenericType: true } nullable)
+            underlying = nullable.TypeArguments[0];
+
+        if (underlying.SpecialType is
+            SpecialType.System_Byte or SpecialType.System_SByte or
+            SpecialType.System_Int16 or SpecialType.System_UInt16 or
+            SpecialType.System_Int32 or SpecialType.System_UInt32 or
+            SpecialType.System_Int64 or SpecialType.System_UInt64 or
+            SpecialType.System_Single or SpecialType.System_Double or
+            SpecialType.System_Decimal)
+        {
+            return true;
+        }
+
+        return underlying.ToDisplayString(FullyQualified) is
+            "global::System.DateTime" or "global::System.DateTimeOffset" or
+            "global::System.TimeSpan" or "global::System.DateOnly" or "global::System.TimeOnly";
+    }
+
+    /// <summary>Reports <see cref="RouteGenDiagnostics.UnsupportedSimpleType"/> unless <paramref name="type"/> is a route/query-safe simple type (primitive, string, enum, Guid, DateTime, etc.), optionally nullable.</summary>
     private static void CheckSimpleType(
         ITypeSymbol type,
         IParameterSymbol param,
@@ -381,40 +625,136 @@ internal static class ApiInterfaceReader
         }
     }
 
-    private static bool IsAttribute(INamedTypeSymbol? attributeType, string simpleName)
-        => attributeType is not null &&
-           (attributeType.Name == simpleName ||
-            attributeType.ToDisplayString().EndsWith("." + simpleName, System.StringComparison.Ordinal));
+    /// <summary>True when <paramref name="attributeType"/> is (or is named like) <paramref name="simpleName"/>, tolerating attributes from any namespace.</summary>
+    /// <summary>
+    /// True when <paramref name="attributeType"/> is the RouteGen attribute named
+    /// <paramref name="simpleName"/> specifically -- i.e. it also lives in
+    /// FlanderDev.RouteGen.Abstractions, not just any type from any assembly that happens to
+    /// share the same simple name. Shared with <see cref="ApiContractGenerator"/> (via internal
+    /// accessibility) rather than duplicated, so both places can't silently drift apart.
+    /// </summary>
+    internal static bool IsAttribute(INamedTypeSymbol? attributeType, string simpleName) =>
+        attributeType is not null &&
+        attributeType.Name == simpleName &&
+        attributeType.ContainingNamespace?.ToDisplayString() == "FlanderDev.RouteGen.Abstractions";
 
+    /// <summary>
+    /// Reports <see cref="RouteGenDiagnostics.RouteCollision"/> for any two same-verb methods on
+    /// <paramref name="model"/> whose routes are guaranteed to resolve identically at runtime --
+    /// same literal text, same parameter positions, and the same constraint at each of those
+    /// positions. Parameter NAMES are deliberately ignored for this comparison: ASP.NET Core's
+    /// routing does not use them to disambiguate at all, so "{id:int}" and "{value:int}" at the
+    /// same position are just as much a guaranteed collision as if they were named identically --
+    /// comparing raw route strings (as this used to) would miss that.
+    /// Also reports <see cref="RouteGenDiagnostics.OverlappingRoute"/> (a Warning, not an Error)
+    /// for the narrower, non-guaranteed case: same shape, but the only difference is that one
+    /// route leaves a position unconstrained while the sibling constrains it there. ASP.NET
+    /// Core's constraint precedence CAN correctly disambiguate many such pairs at runtime, so this
+    /// is flagged as worth double-checking rather than asserted as broken.
+    /// Deliberately does not attempt to reason about optional route parameters creating
+    /// variable-length effective routes (e.g. "{id:int?}" also matching a shorter sibling route)
+    /// -- that requires modeling ASP.NET Core's actual precedence rules, not just comparing
+    /// parsed shapes, and is out of scope for this pass.
+    /// </summary>
     private static void DetectRouteCollisions(
          ApiInterfaceModel model,
          List<Diagnostic> diagnostics)
     {
-        var seen = new Dictionary<string, ApiMethodModel>();
+        var byVerb = model.Methods
+            .GroupBy(m => m.Verb, System.StringComparer.OrdinalIgnoreCase);
 
-        foreach (var m in model.Methods)
+        foreach (var verbGroup in byVerb)
         {
-            string route = RouteTemplateParser.Combine(model.BaseRoute, m.RouteSuffix);
-            string key = m.Verb + " " + route.ToLowerInvariant();
+            var methods = verbGroup.ToList();
 
-            if (seen.TryGetValue(key, out var existing))
+            for (int i = 0; i < methods.Count; i++)
             {
-                diagnostics.Add(Diagnostic.Create(
-                    RouteGenDiagnostics.RouteCollision,
-                    Location.None,
-                    existing.Name,
-                    m.Name,
-                    model.InterfaceName,
-                    m.Verb,
-                    route));
-            }
-            else
-            {
-                seen[key] = m;
+                for (int j = i + 1; j < methods.Count; j++)
+                {
+                    CompareRoutesForCollisionOrOverlap(model, methods[i], methods[j], diagnostics);
+                }
             }
         }
     }
 
+    /// <summary>Compares two same-verb methods' route shapes and reports RG0001 or RG0013 as appropriate; reports nothing if the routes simply don't overlap. See <see cref="DetectRouteCollisions"/> for the full rationale.</summary>
+    private static void CompareRoutesForCollisionOrOverlap(
+        ApiInterfaceModel model,
+        ApiMethodModel a,
+        ApiMethodModel b,
+        List<Diagnostic> diagnostics)
+    {
+        var partsA = a.RouteTemplate.Parts;
+        var partsB = b.RouteTemplate.Parts;
+
+        if (partsA.Count != partsB.Count) return;
+
+        bool shapeMatches = true;
+        bool anyConstraintDiffers = false;
+
+        for (int k = 0; k < partsA.Count; k++)
+        {
+            bool isParamA = partsA[k] is RouteParameterPart;
+            bool isParamB = partsB[k] is RouteParameterPart;
+
+            if (isParamA != isParamB)
+            {
+                shapeMatches = false;
+                break;
+            }
+
+            if (!isParamA)
+        {
+                var literalA = (RouteLiteralPart)partsA[k];
+                var literalB = (RouteLiteralPart)partsB[k];
+
+                if (!string.Equals(literalA.Text, literalB.Text, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    shapeMatches = false;
+                    break;
+                }
+            }
+            else
+            {
+                var paramA = (RouteParameterPart)partsA[k];
+                var paramB = (RouteParameterPart)partsB[k];
+
+                if (!string.Equals(paramA.Constraint, paramB.Constraint, System.StringComparison.OrdinalIgnoreCase))
+                    anyConstraintDiffers = true;
+            }
+        }
+
+        if (!shapeMatches) return;
+
+        string routeA = a.RouteTemplate.Original;
+        string routeB = b.RouteTemplate.Original;
+
+        if (!anyConstraintDiffers)
+            {
+                diagnostics.Add(Diagnostic.Create(
+                    RouteGenDiagnostics.RouteCollision,
+                    Location.None,
+                a.Name,
+                b.Name,
+                    model.InterfaceName,
+                a.Verb,
+                routeA));
+            }
+            else
+            {
+            diagnostics.Add(Diagnostic.Create(
+                RouteGenDiagnostics.OverlappingRoute,
+                Location.None,
+                a.Name,
+                b.Name,
+                model.InterfaceName,
+                a.Verb,
+                routeA,
+                routeB));
+        }
+    }
+
+    /// <summary>Reads an <see cref="AuthorizeAttribute"/> from <paramref name="attributes"/>, if present.</summary>
     private static (bool authorize, string? roles, string? policy) ReadAuthorize(
         ImmutableArray<AttributeData> attributes)
     {
@@ -435,6 +775,7 @@ internal static class ApiInterfaceReader
         return (true, roles, policy);
     }
 
+    /// <summary>Formats a parameter's declared default value as a C# literal usable in generated source, handling null, enum, string, bool, and char specially.</summary>
     private static string? FormatDefault(IParameterSymbol param)
     {
         if (!param.HasExplicitDefaultValue) return null;
@@ -468,12 +809,17 @@ internal static class ApiInterfaceReader
         return value.ToString();
     }
 
+    /// <summary>The first source location for <paramref name="symbol"/>, or <see cref="Location.None"/> if it has none.</summary>
     private static Location GetLocation(ISymbol symbol) =>
         symbol.Locations.FirstOrDefault() ?? Location.None;
 
+    /// <summary>The HTTP verb and optional route suffix parsed from a method's verb attribute.</summary>
     private readonly struct HttpVerbInfo(string verb, string? suffix)
     {
+        /// <summary>The HTTP verb, e.g. "GET".</summary>
         public string Verb { get; } = verb;
+
+        /// <summary>The route template suffix, if any.</summary>
         public string? Suffix { get; } = suffix;
     }
 }

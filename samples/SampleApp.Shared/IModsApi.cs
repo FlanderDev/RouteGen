@@ -21,15 +21,16 @@ public partial interface IModsApi
     [Authorize]
     Task<ModDto> Upload([Body] ModUploadDto dto);
 
-    // [Form]/[File] demonstrate multipart/form-data: ordinary form fields alongside a single
-    // required file. Not combinable with [Body] on the same method (a request has one content
-    // type) -- see RG0009.
+    // [File] can be FormFile<TMetadata> instead of plain FormFile when the caller needs to
+    // attach local data to the upload -- UploadClientContext here never reaches the server (see
+    // FormFile<TMetadata>'s doc comment); it's purely for the caller's own bookkeeping around
+    // the call (e.g. correlating this upload with UI state or a retry attempt).
     [Post("upload-with-screenshot")]
     [Authorize]
     Task<ModDto> UploadWithScreenshot(
         [Form] string name,
         [Form] string description,
-        [File] FormFile screenshot,
+        [File] FormFile<UploadClientContext> screenshot,
         CancellationToken ct = default);
 
     // [File] on an IReadOnlyList<FormFile>? parameter is the multi-file form: several files
@@ -52,6 +53,10 @@ public enum SortBy
     Popular = 0,
     Newest = 1,
 }
+
+// Purely local to the client -- attached to a FormFile<TMetadata> upload but never sent to the
+// server. Any type works here; this one just happens to be a record for convenience.
+public sealed record UploadClientContext(string CorrelationId, int AttemptNumber);
 
 public sealed record ModDto(int Id, string Name, string Author, int Downloads);
 

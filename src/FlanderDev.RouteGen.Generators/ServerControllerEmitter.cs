@@ -3,8 +3,10 @@ using System.Text;
 
 namespace FlanderDev.RouteGen.Generators;
 
+/// <summary>Emits the abstract MVC controller base class for a parsed <see cref="ApiInterfaceModel"/>.</summary>
 internal static class ServerControllerEmitter
 {
+    /// <summary>Renders the full generated source (including <c>#nullable enable</c>, usings, and namespace) for <paramref name="model"/>'s abstract controller base.</summary>
     public static string Emit(ApiInterfaceModel model)
     {
         var sb = new StringBuilder();
@@ -45,6 +47,7 @@ internal static class ServerControllerEmitter
         return sb.ToString();
     }
 
+    /// <summary>Emits one abstract action method (verb/route/authorization attributes plus the signature) for <paramref name="method"/>.</summary>
     private static void EmitControllerMethod(StringBuilder sb, string indent, ApiMethodModel method)
     {
         string httpAttr = method.Verb switch
@@ -80,6 +83,7 @@ internal static class ServerControllerEmitter
         sb.AppendLine();
     }
 
+    /// <summary>Computes the generated action method's <c>Task&lt;ActionResult&lt;...&gt;&gt;</c>-shaped return type for <paramref name="method"/>.</summary>
     private static string ActionResultReturnType(ApiMethodModel method)
     {
         if (method.ResponseTypeFullName is null)
@@ -91,19 +95,28 @@ internal static class ServerControllerEmitter
         return $"global::System.Threading.Tasks.Task<ActionResult<{method.ResponseTypeFullName}>>";
     }
 
+    /// <summary>Formats one method parameter, including its ASP.NET Core binding attribute (<c>[FromRoute]</c>/<c>[FromQuery]</c>/<c>[FromBody]</c>/<c>[FromForm]</c>) and default value.</summary>
     private static string FormatParameter(ApiParameterModel p)
     {
         if (p.Kind == ParameterKind.CancellationToken)
-            return "global::System.Threading.CancellationToken " + p.Name + " = default";
+        {
+            // AssignCancellationTokenDefault (in ApiInterfaceReader) already decided whether this
+            // can safely get a default without pushing a later required parameter into an
+            // invalid "required after optional" position (CS1737) -- respect that decision
+            // exactly, the same as every other parameter kind, instead of forcing one here.
+            string ctDefault = p.HasDefaultValue ? " = " + p.DefaultValueLiteral : "";
+            return "global::System.Threading.CancellationToken " + p.Name + ctDefault;
+        }
 
         if (p.Kind == ParameterKind.File)
         {
-            // The client-side FormFile record is a wire-level convenience type; ASP.NET Core's
-            // own model binder understands IFormFile/List<IFormFile>, not FormFile, so this
+            // The client-side FormFile/FormFile<TMetadata> is a wire-level convenience type;
+            // ASP.NET Core's own model binder understands IFormFile, not FormFile, so this
             // deliberately ignores TypeFullName (which still says "FormFile") for this Kind.
-            string fileType = p.IsMultiFile
-                ? "global::System.Collections.Generic.List<global::Microsoft.AspNetCore.Http.IFormFile>"
-                : "global::Microsoft.AspNetCore.Http.IFormFile";
+            // ServerFileTypeFullName was computed at parse time to mirror the client's exact
+            // collection shape (array/List<>/IEnumerable<>/etc.) wherever ASP.NET Core's model
+            // binder is verified to support it -- see TryGetFileParameterShape.
+            string fileType = p.ServerFileTypeFullName!;
 
             if (p.IsNullable) fileType += "?";
 
@@ -126,6 +139,7 @@ internal static class ServerControllerEmitter
         return result;
     }
 
+    /// <summary>Formats an <c>[Authorize]</c>/<c>[Authorize(Roles = ..., Policy = ...)]</c> attribute from the given roles/policy.</summary>
     private static string FormatAuthorizeAttribute(string? roles, string? policy)
     {
         var args = new System.Collections.Generic.List<string>();
@@ -134,5 +148,6 @@ internal static class ServerControllerEmitter
         return args.Count == 0 ? "[Authorize]" : $"[Authorize({string.Join(", ", args)})]";
     }
 
+    /// <summary>Escapes backslashes and double quotes for embedding <paramref name="s"/> in a generated C# string literal.</summary>
     private static string EscapeString(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
 }

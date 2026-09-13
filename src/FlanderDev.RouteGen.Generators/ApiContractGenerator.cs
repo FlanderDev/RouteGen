@@ -31,16 +31,26 @@ namespace FlanderDev.RouteGen.Generators;
 [Generator(LanguageNames.CSharp)]
 public sealed class ApiContractGenerator : IIncrementalGenerator
 {
+    /// <inheritdoc cref="IIncrementalGenerator.Initialize"/>
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var provider = context.CompilationProvider.Select(static (compilation, ct) =>
         {
-            bool isServer = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ControllerBase") is not null;
+            var controllerBaseType = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ControllerBase");
+            bool isServer = controllerBaseType is not null;
+
+            // Only resolvable in the same compilation as ControllerBase (i.e. the server project) --
+            // used by RG0011 to verify a custom [File] collection type's generic constraints
+            // actually permit IFormFile. When this is null (Shared/Client, which have no ASP.NET
+            // Core reference), that check is skipped entirely rather than guessed at: the exact
+            // same interface is independently re-parsed when the Server project's own compilation
+            // runs, where this WILL resolve and the check WILL fire there.
+            var formFileType = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IFormFile");
 
             // Bail out entirely if this compilation doesn't reference the RouteGen abstractions --
             // there is nothing to find, and no reason to pay for walking every referenced assembly.
             if (FindType(compilation, nameof(ApiRouteAttribute)) is null)
-                return (Interfaces: [], IsServer: isServer);
+                return (Interfaces: [], IsServer: isServer, FormFileType: formFileType);
 
             var found = new List<INamedTypeSymbol>();
             var seen = new HashSet<string>();
@@ -60,7 +70,7 @@ public sealed class ApiContractGenerator : IIncrementalGenerator
                 CollectAttributedInterfaces(referencedAssembly.GlobalNamespace, found, seen, ct);
             }
 
-            return (Interfaces: found, IsServer: isServer);
+            return (Interfaces: found, IsServer: isServer, FormFileType: formFileType);
         });
 
         context.RegisterSourceOutput(provider, static (spc, data) =>
@@ -68,7 +78,7 @@ public sealed class ApiContractGenerator : IIncrementalGenerator
             foreach (var interfaceSymbol in data.Interfaces)
             {
                 var diagnostics = new List<Diagnostic>();
-                var model = ApiInterfaceReader.TryParse(interfaceSymbol, diagnostics);
+                var model = ApiInterfaceReader.TryParse(interfaceSymbol, data.FormFileType, diagnostics);
                 foreach (var d in diagnostics) spc.ReportDiagnostic(d);
                 if (model is null || model.Methods.Count == 0) continue;
 
@@ -82,6 +92,7 @@ public sealed class ApiContractGenerator : IIncrementalGenerator
         });
     }
 
+    /// <summary>Recursively collects every <c>[ApiRoute]</c>-decorated interface (including nested types) under <paramref name="ns"/> into <paramref name="results"/>, deduplicated via <paramref name="seen"/>.</summary>
     private static void CollectAttributedInterfaces(
         INamespaceSymbol ns, List<INamedTypeSymbol> results, HashSet<string> seen, CancellationToken ct)
     {
@@ -103,15 +114,17 @@ public sealed class ApiContractGenerator : IIncrementalGenerator
         }
     }
 
+    /// <summary>Adds <paramref name="type"/> to <paramref name="results"/> if it's an interface carrying <c>[ApiRoute]</c> and hasn't already been seen.</summary>
     private static void CollectIfAttributed(INamedTypeSymbol type, List<INamedTypeSymbol> results, HashSet<string> seen)
     {
         if (type.TypeKind != TypeKind.Interface) return;
-        if (!type.GetAttributes().Any(a => IsAttribute(a.AttributeClass, nameof(ApiRouteAttribute)))) return;
+        if (!type.GetAttributes().Any(a => ApiInterfaceReader.IsAttribute(a.AttributeClass, nameof(ApiRouteAttribute)))) return;
 
         string key = type.ToDisplayString();
         if (seen.Add(key)) results.Add(type);
     }
 
+    /// <summary>Finds a type named <paramref name="simpleName"/> in <paramref name="compilation"/>'s own assembly or any referenced assembly.</summary>
     private static INamedTypeSymbol? FindType(Compilation compilation, string simpleName)
     {
         var found = FindType(compilation.Assembly.GlobalNamespace, simpleName);
@@ -128,6 +141,7 @@ public sealed class ApiContractGenerator : IIncrementalGenerator
         return null;
     }
 
+    /// <summary>Recursively searches <paramref name="ns"/> (including nested types) for a type named <paramref name="simpleName"/>.</summary>
     private static INamedTypeSymbol? FindType(INamespaceSymbol ns, string simpleName)
     {
         foreach (var member in ns.GetMembers())
@@ -155,9 +169,4 @@ public sealed class ApiContractGenerator : IIncrementalGenerator
 
         return null;
     }
-
-    private static bool IsAttribute(INamedTypeSymbol? attributeType, string simpleName)
-        => attributeType is not null &&
-           (attributeType.Name == simpleName ||
-            attributeType.ToDisplayString().EndsWith("." + simpleName, System.StringComparison.Ordinal));
 }

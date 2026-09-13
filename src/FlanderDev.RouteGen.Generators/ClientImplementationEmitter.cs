@@ -3,8 +3,10 @@ using System.Text;
 
 namespace FlanderDev.RouteGen.Generators;
 
+/// <summary>Emits the concrete <see cref="System.Net.Http.HttpClient"/>-backed client implementation for a parsed <see cref="ApiInterfaceModel"/>.</summary>
 internal static class ClientImplementationEmitter
 {
+    /// <summary>Renders the full generated source (including <c>#nullable enable</c>, usings, and namespace) for <paramref name="model"/>'s client implementation.</summary>
     public static string Emit(ApiInterfaceModel model)
     {
         var sb = new StringBuilder();
@@ -48,6 +50,7 @@ internal static class ClientImplementationEmitter
         return sb.ToString();
     }
 
+    /// <summary>Emits one client method body: URL/query-string building (or multipart content building), the HTTP call, and response handling for <paramref name="method"/>.</summary>
     private static void EmitClientMethod(
         StringBuilder sb,
         string indent,
@@ -78,6 +81,8 @@ internal static class ClientImplementationEmitter
 
             foreach (var q in queryParams)
             {
+                string invariant = q.IsCultureSensitive ? "System.Globalization.CultureInfo.InvariantCulture" : "";
+
                 if (q.IsNullable)
                 {
                     sb.Append(bodyIndent).Append("if (").Append(q.Name).AppendLine(" is not null)");
@@ -85,7 +90,7 @@ internal static class ClientImplementationEmitter
                       .Append(q.Name)
                       .Append("={Uri.EscapeDataString(")
                       .Append(q.Name)
-                      .AppendLine("!.ToString()!)}\");");
+                      .Append("!.ToString(").Append(invariant).AppendLine(")!)}\");");
                 }
                 else
                 {
@@ -93,7 +98,7 @@ internal static class ClientImplementationEmitter
                       .Append(q.Name)
                       .Append("={Uri.EscapeDataString(")
                       .Append(q.Name)
-                      .AppendLine(".ToString() ?? string.Empty)}\");");
+                      .Append(".ToString(").Append(invariant).AppendLine(") ?? string.Empty)}\");");
                 }
             }
 
@@ -178,22 +183,25 @@ internal static class ClientImplementationEmitter
         sb.AppendLine();
     }
 
+    /// <summary>Builds the <c>MultipartFormDataContent</c> and adds one part per <c>[Form]</c>/<c>[File]</c> parameter for a <see cref="ApiMethodModel.UsesMultipart"/> method.</summary>
     private static void EmitMultipartContentBuilding(StringBuilder sb, string bodyIndent, ApiMethodModel method)
     {
         sb.Append(bodyIndent).AppendLine("var __content = new MultipartFormDataContent();");
 
         foreach (var p in method.Parameters.Where(p => p.Kind == ParameterKind.Form))
         {
+            string invariant = p.IsCultureSensitive ? "System.Globalization.CultureInfo.InvariantCulture" : "";
+
             if (p.IsNullable)
             {
                 sb.Append(bodyIndent).Append("if (").Append(p.Name).AppendLine(" is not null)");
                 sb.Append(bodyIndent).Append("    __content.Add(new StringContent(")
-                  .Append(p.Name).Append("!.ToString()!), \"").Append(p.Name).AppendLine("\");");
+                  .Append(p.Name).Append("!.ToString(").Append(invariant).Append(")!), \"").Append(p.Name).AppendLine("\");");
             }
             else
             {
                 sb.Append(bodyIndent).Append("__content.Add(new StringContent(")
-                  .Append(p.Name).Append(".ToString() ?? string.Empty), \"").Append(p.Name).AppendLine("\");");
+                  .Append(p.Name).Append(".ToString(").Append(invariant).Append(") ?? string.Empty), \"").Append(p.Name).AppendLine("\");");
             }
         }
 
@@ -206,6 +214,7 @@ internal static class ClientImplementationEmitter
         }
     }
 
+    /// <summary>Emits the <c>StreamContent</c> part for a single-file <c>[File]</c> parameter <paramref name="p"/>, guarded by a null check when nullable.</summary>
     private static void EmitSingleFilePart(StringBuilder sb, string bodyIndent, ApiParameterModel p)
     {
         string indent = bodyIndent;
@@ -232,6 +241,7 @@ internal static class ClientImplementationEmitter
             sb.Append(bodyIndent).AppendLine("}");
     }
 
+    /// <summary>Emits one <c>StreamContent</c> part per item for a multi-file <c>[File]</c> parameter <paramref name="p"/>, guarded by a null check when nullable.</summary>
     private static void EmitMultiFilePart(StringBuilder sb, string bodyIndent, ApiParameterModel p)
     {
         string indent = bodyIndent;
@@ -263,6 +273,7 @@ internal static class ClientImplementationEmitter
             sb.Append(bodyIndent).AppendLine("}");
     }
 
+    /// <summary>Builds the C# string-literal expression for a method's request URL: literal text passed through as-is, route-token parts substituted with their matching (URL-escaped) parameter.</summary>
     private static string BuildInterpolatedTemplateLiteral(
         RouteTemplate template,
         ApiMethodModel method)
@@ -294,9 +305,10 @@ internal static class ClientImplementationEmitter
 
             if (param is not null)
             {
+                string invariant = param.IsCultureSensitive ? "System.Globalization.CultureInfo.InvariantCulture" : "";
                 string accessor = param.IsNullable
-                    ? param.Name + "?.ToString() ?? string.Empty"
-                    : param.Name + ".ToString() ?? string.Empty";
+                    ? param.Name + "?.ToString(" + invariant + ") ?? string.Empty"
+                    : param.Name + ".ToString(" + invariant + ") ?? string.Empty";
 
                 sb.Append("\" + Uri.EscapeDataString(")
                   .Append(accessor)
@@ -324,10 +336,18 @@ internal static class ClientImplementationEmitter
         return sb.ToString();
     }
 
+    /// <summary>Formats one client method parameter, including its default value when the interface declared one.</summary>
     private static string FormatParameter(ApiParameterModel p)
     {
         if (p.Kind == ParameterKind.CancellationToken)
-            return "CancellationToken " + p.Name + " = default";
+        {
+            // AssignCancellationTokenDefault (in ApiInterfaceReader) already decided whether this
+            // can safely get a default without pushing a later required parameter into an
+            // invalid "required after optional" position (CS1737) -- respect that decision
+            // exactly, the same as every other parameter kind, instead of forcing one here.
+            string ctDefault = p.HasDefaultValue ? " = " + p.DefaultValueLiteral : "";
+            return "CancellationToken " + p.Name + ctDefault;
+        }
 
         string result = p.TypeFullName + " " + p.Name;
 
@@ -337,6 +357,7 @@ internal static class ClientImplementationEmitter
         return result;
     }
 
+    /// <summary>Escapes backslashes and double quotes for embedding <paramref name="s"/> in a generated C# string literal.</summary>
     private static string EscapeString(string s) =>
         s.Replace("\\", "\\\\").Replace("\"", "\\\"");
 }

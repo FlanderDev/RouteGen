@@ -86,8 +86,9 @@ Task<ModDto> UploadWithScreenshot(
     [File] FormFile screenshot,
     CancellationToken ct = default);
 
-// [File] on an IReadOnlyList<FormFile> (optionally nullable) parameter accepts several files
-// under the same field name.
+// [File] on a collection-of-FormFile-typed parameter (optionally nullable) accepts several
+// files under the same field name. IReadOnlyList<FormFile> here; List<>, an array, and several
+// other shapes work too -- see the exact accepted list below.
 [Post("upload-with-gallery")]
 [Authorize]
 Task<ModDto> UploadWithGallery(
@@ -99,13 +100,45 @@ Task<ModDto> UploadWithGallery(
 
 - `[Form]` parameters must be simple types (same rule as `[Query]`) and become `[FromForm]`
   server-side / a `StringContent` part client-side.
-- `[File]` parameters must be `FormFile` (single file) or `IReadOnlyList<FormFile>` — optionally
-  nullable either way — never anything else (RG0010). Server-side these become
-  `IFormFile`/`List<IFormFile>`; client-side, `FormFile` (from `RouteGen.Abstractions`) is a
-  small `record` — `FormFile(Stream Content, string FileName, string? ContentType)` — that
-  carries what a multipart file part needs to be built correctly. The caller owns the `Stream`
-  and is responsible for disposing it once the call completes, same as any other API taking a
+- `[File]` parameters must be `FormFile`/`FormFile<TMetadata>` (single file), or — for multiple
+  files — one of: an array, `List<>`, `IEnumerable<>`, `ICollection<>`, `IList<>`,
+  `IReadOnlyList<>`, `IReadOnlyCollection<>` (of either), or another concrete generic collection
+  type with a public parameterless constructor that implements `ICollection<>` — optionally
+  nullable either way — never anything else (RG0010). **The server generates the exact same
+  collection type the client declared** (with `IFormFile` substituted for `FormFile`) — this
+  list isn't an arbitrary restriction, it's precisely the set of shapes
+  [ASP.NET Core's own model binder](https://github.com/dotnet/aspnetcore/blob/main/src/Mvc/Mvc.Core/src/ModelBinding/ModelBindingHelper.cs)
+  is verified able to construct without throwing at request time (types like
+  `ImmutableList<>` satisfy the interface check but have no public constructor, which throws
+  `MissingMethodException` from ASP.NET Core's own binder at runtime if used directly — RouteGen
+  checks for the constructor explicitly so this is rejected at compile time instead, as RG0010).
+  A non-generic custom collection class hardcoded to hold `FormFile` specifically can never be
+  mirrored this way, since there's no way to construct an analogous type over `IFormFile` — those
+  are always rejected too. A custom **generic** collection type is also checked for a subtler
+  problem: if it constrains its element type parameter in a way `IFormFile` can't satisfy (a
+  plausible `where T : FormFile`, for instance — a class constraint, which an interface can never
+  meet), mirroring it to `IFormFile` would produce an invalid closed generic type. RouteGen checks
+  this too and rejects it at compile time (RG0011) rather than letting it surface as a confusing
+  generic-constraint error in the generated server file. This specific check only runs in the
+  server project's own build (it needs `IFormFile` itself to be resolvable to check against) —
+  the same interface method is independently parsed there regardless of where else it's
+  referenced from, so the check still fires at the point it's actually decidable.
+  Client-side, `FormFile` (from `RouteGen.Abstractions`) is a small
+  `record` — `FormFile(Stream Content, string FileName, string? ContentType)` — that carries
+  what a multipart file part needs to be built correctly. The caller owns the `Stream` and is
+  responsible for disposing it once the call completes, same as any other API taking a
   caller-supplied stream.
+- `FormFile<TMetadata>` attaches an arbitrary runtime value to the upload, for when the caller
+  needs to correlate it with local state (UI context, progress tracking, retry bookkeeping):
+
+  ```csharp
+  [File] FormFile<UploadContext> screenshot
+  // call site: new FormFile<UploadContext>(stream, "pic.png", Metadata: new UploadContext(...))
+  ```
+
+  `TMetadata` never reaches the server or changes the wire contract — `[File]` binds to
+  `IFormFile` server-side either way, exactly as it does for plain `FormFile`. If the data
+  genuinely needs to reach the server, send it as an ordinary `[Form]` field instead.
 - `[Body]` and `[Form]`/`[File]` can't be combined on the same method — an HTTP request only has
   one content type (RG0009).
 - There's no attribute for request size limits; that stays a hosting/infrastructure concern
@@ -160,6 +193,32 @@ public static class Paths
 
 Use it instead of hard-coded URLs. Override the generated member name with `@attribute [GeneratedPathName("Whatever")]` if the default (derived from the `.razor` filename) would collide with another page.
 
+### Components with more than one `@page` route
+
+A single component can declare more than one `@page` directive — Blazor supports this natively.
+The first route on a component behaves exactly as described above (filename-derived name, or the
+single-argument `[GeneratedPathName("Name")]` override). Every route *after* the first requires
+its own explicit two-argument override, naming that specific route by its literal text:
+
+```razor
+@page "/mods"
+@page "/mods/list"
+@attribute [GeneratedPathName("/mods/list", "ModsList")]
+```
+
+```csharp
+public static class Paths
+{
+    public const string Mods = "/mods";
+    public const string ModsList = "/mods/list";
+}
+```
+
+This is required, not optional — RouteGen won't guess a name for you (e.g. by numbering routes),
+since that would silently rename a generated member the moment a route were reordered or removed
+in the source file. A route with no matching override is RG0012, a compile error naming exactly
+which route needs one.
+
 `PageRouteGenerator` generates `Paths` into whichever project has the `.razor` files listed as `AdditionalFiles` — it doesn't care where those files physically live, only that they're visible to the compilation it's running in.
 
 The recommended setup, and what the sample under `samples/` does, is to run **both** generators from the Shared project rather than from Client:
@@ -186,18 +245,36 @@ If you'd rather keep Shared a plain contracts-only library with no generator dep
 
 | ID | Meaning |
 |----|---------|
-| RG0001 | Duplicate verb + route |
+| RG0001 | Duplicate verb + route (parameter *names* don't count — `{id:int}` and `{value:int}` at the same position collide just the same) |
 | RG0002 | `[Body]` on GET/DELETE (warning) |
 | RG0003 | Route token with no matching parameter |
-| RG0004 | Parameter not marked as route / query / body |
+| RG0004 | Parameter not marked as route / query / body / form / file |
 | RG0005 | More than one `[Body]` |
 | RG0006 | Unsupported parameter type |
 | RG0007 | Duplicate `Paths` member name |
 | RG0008 | Unparseable route template |
 | RG0009 | `[Body]` combined with `[Form]`/`[File]` on the same method |
-| RG0010 | `[File]` parameter isn't `FormFile` or `IReadOnlyList<FormFile>` |
+| RG0010 | `[File]` parameter's collection type isn't verified-bindable — see the README |
+| RG0011 | Custom `[File]` collection type's generic constraint can't be satisfied by `IFormFile` |
+| RG0012 | A component's `@page` route beyond the first has no matching `[GeneratedPathName]` |
+| RG0013 | Two routes have the same shape but differ in constraint tightness at one position (warning) |
 
 These turn what would be runtime URL bugs into build-time errors.
+
+### A note on RG0001 vs RG0013
+
+RG0001 only fires when two routes are **guaranteed** to resolve identically at runtime — same
+literal text, same parameter positions, same constraint at each of those positions (parameter
+*names* are ignored, since ASP.NET Core's routing never uses them to disambiguate). RG0013 is
+the softer, non-guaranteed sibling: same shape, but one route leaves a position unconstrained
+(or differently constrained) where the other doesn't. ASP.NET Core's constraint precedence can
+correctly resolve many such pairs, so this is a warning worth double-checking, not an assertion
+that the code is broken. Deeper route-ambiguity analysis (e.g. accounting for optional
+parameters creating variable-length effective routes) is intentionally out of scope — it would
+mean re-implementing a meaningful slice of ASP.NET Core's own routing precedence rules, with
+real risk of false positives on a public analyzer. `AmbiguousMatchException` remains the runtime
+backstop for anything past what RG0001/RG0013 catch, and it surfaces on the very first request
+that actually hits the ambiguity, in any environment including local dev.
 
 ## Sample
 
