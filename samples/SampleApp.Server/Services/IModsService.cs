@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Http;
 using SampleApp.Shared;
 
 namespace SampleApp.Server.Services;
