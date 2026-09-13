@@ -47,7 +47,7 @@ public sealed class InMemoryModsService : IModsService
         return Task.FromResult(mod);
     }
 
-    public Task<ModDto> UploadWithScreenshot(string name, string description, IFormFile screenshot)
+    public Task<ModDto> UploadWithScreenshot(string name, FileInfo FormFile, IFormFile screenshot)
     {
         // A real implementation would stream `screenshot.OpenReadStream()` to blob storage (or
         // similar) rather than buffering it -- that's exactly the streaming behavior
