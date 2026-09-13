@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using SampleApp.Shared;
+using FlanderDev.RouteGen.Abstractions;
 
 namespace SampleApp.Server.Services;
 
@@ -9,7 +10,7 @@ public interface IModsService
     Task<ModDto?> GetMod(int id);
     Task<ModDto> Upload(ModUploadDto dto);
     Task<ModDto> UploadWithScreenshot(string name, string description, IFormFile screenshot);
-    Task<ModDto> UploadWithGallery(string name, string description, IReadOnlyList<ModsApiControllerBase.FileWithData<PhotoCaption>>? gallery);
+    Task<ModDto> UploadWithGallery(string name, string description, IReadOnlyList<FileWithData<PhotoCaption>>? gallery);
     Task<bool> Delete(int id);
 }
 
@@ -58,7 +59,7 @@ public sealed class InMemoryModsService : IModsService
         return Task.FromResult(mod);
     }
 
-    public Task<ModDto> UploadWithGallery(string name, string description, IReadOnlyList<ModsApiControllerBase.FileWithData<PhotoCaption>>? gallery)
+    public Task<ModDto> UploadWithGallery(string name, string description, IReadOnlyList<FileWithData<PhotoCaption>>? gallery)
     {
         // Each item's own .Data (PhotoCaption) travels with its .File -- no separate parallel
         // list of captions to zip back up by index, and no risk of a dropped/reordered file

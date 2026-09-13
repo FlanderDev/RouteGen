@@ -1,4 +1,4 @@
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 
 namespace FlanderDev.RouteGen.Migration;
 
@@ -10,7 +10,7 @@ namespace FlanderDev.RouteGen.Migration;
 /// categories into one sequence would make the Error List harder to reason about long after
 /// migration is done and this package has been removed.
 /// </summary>
-internal static class MigrationDiagnostics
+public static class MigrationDiagnostics
 {
     /// <summary>The shared diagnostic category for every RouteGen.Migration diagnostic.</summary>
     private const string Category = "RouteGen.Migration";

@@ -12,5 +12,6 @@
 	</ItemGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\SampleApp.Shared\SampleApp.Shared.csproj" />
+		<ProjectReference Include="..\..\src\FlanderDev.RouteGen.Abstractions\FlanderDev.RouteGen.Abstractions.csproj" />
 	</ItemGroup>
 </Project>
