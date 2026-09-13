@@ -27,6 +27,11 @@ dotnet add package FlanderDev.RouteGen.Generators
 
 For page-route generation, add your `.razor` files as `AdditionalFiles` to whichever project you want the generated `Paths` class to live in — see [Page routes](#page-routes) below for the recommended pattern (put it in the shared project so both server and client see the same `Paths` type).
 
+**Migrating an existing API onto RouteGen?** There's a third, optional package,
+`FlanderDev.RouteGen.Migration`, that reverse-engineers an attribute-routed controller into a
+starting-point interface — add it temporarily, run it, remove it. See its own
+[README](src/FlanderDev.RouteGen.Migration/README.md) for what it does and doesn't do.
+
 ## Define the API once
 
 ```csharp
@@ -86,40 +91,47 @@ Task<ModDto> UploadWithScreenshot(
     [File] FormFile screenshot,
     CancellationToken ct = default);
 
-// [File] on a collection-of-FormFile-typed parameter (optionally nullable) accepts several
-// files under the same field name. IReadOnlyList<FormFile> here; List<>, an array, and several
-// other shapes work too -- see the exact accepted list below.
+// [File] on a collection-of-FileWithData<TData>-typed parameter (optionally nullable) accepts
+// several files under the same field name, each carrying its own data -- no separate parallel
+// list to keep in sync by index. IReadOnlyList<> here; List<>, an array, and several other
+// shapes work too -- see the exact accepted list below.
 [Post("upload-with-gallery")]
 [Authorize]
 Task<ModDto> UploadWithGallery(
     [Form] string name,
     [Form] string description,
-    [File] IReadOnlyList<FormFile>? gallery,
+    [File] IReadOnlyList<FileWithData<PhotoCaption>>? gallery,
     CancellationToken ct = default);
+
+public sealed record PhotoCaption(string Caption, int SortOrder);
 ```
 
 - `[Form]` parameters must be simple types (same rule as `[Query]`) and become `[FromForm]`
   server-side / a `StringContent` part client-side.
-- `[File]` parameters must be `FormFile`/`FormFile<TMetadata>` (single file), or — for multiple
-  files — one of: an array, `List<>`, `IEnumerable<>`, `ICollection<>`, `IList<>`,
+- `[File]` parameters must be `FormFile` or `FileWithData<TData>` (single file), or — for
+  multiple files — one of: an array, `List<>`, `IEnumerable<>`, `ICollection<>`, `IList<>`,
   `IReadOnlyList<>`, `IReadOnlyCollection<>` (of either), or another concrete generic collection
   type with a public parameterless constructor that implements `ICollection<>` — optionally
   nullable either way — never anything else (RG0010). **The server generates the exact same
-  collection type the client declared** (with `IFormFile` substituted for `FormFile`) — this
-  list isn't an arbitrary restriction, it's precisely the set of shapes
-  [ASP.NET Core's own model binder](https://github.com/dotnet/aspnetcore/blob/main/src/Mvc/Mvc.Core/src/ModelBinding/ModelBindingHelper.cs)
+  collection type the client declared** (with `IFormFile` substituted for `FormFile`, or the
+  generated controller base's own nested `FileWithData<TData>` substituted for
+  `FileWithData<TData>`) — this list isn't an arbitrary restriction, it's precisely the set of
+  shapes [ASP.NET Core's own model binder](https://github.com/dotnet/aspnetcore/blob/main/src/Mvc/Mvc.Core/src/ModelBinding/ModelBindingHelper.cs)
   is verified able to construct without throwing at request time (types like
   `ImmutableList<>` satisfy the interface check but have no public constructor, which throws
   `MissingMethodException` from ASP.NET Core's own binder at runtime if used directly — RouteGen
   checks for the constructor explicitly so this is rejected at compile time instead, as RG0010).
   A non-generic custom collection class hardcoded to hold `FormFile` specifically can never be
   mirrored this way, since there's no way to construct an analogous type over `IFormFile` — those
-  are always rejected too. A custom **generic** collection type is also checked for a subtler
-  problem: if it constrains its element type parameter in a way `IFormFile` can't satisfy (a
-  plausible `where T : FormFile`, for instance — a class constraint, which an interface can never
-  meet), mirroring it to `IFormFile` would produce an invalid closed generic type. RouteGen checks
-  this too and rejects it at compile time (RG0011) rather than letting it surface as a confusing
-  generic-constraint error in the generated server file. This specific check only runs in the
+  are always rejected too. A custom **generic** collection type closed over `FormFile` is also
+  checked for a subtler problem: if it constrains its element type parameter in a way `IFormFile`
+  can't satisfy (a plausible `where T : FormFile`, for instance — a class constraint, which an
+  interface can never meet), mirroring it to `IFormFile` would produce an invalid closed generic
+  type. RouteGen checks this too and rejects it at compile time (RG0011) rather than letting it
+  surface as a confusing generic-constraint error in the generated server file. (This check
+  doesn't extend to a custom collection closed over `FileWithData<TData>` — a custom collection
+  *and* paired-data files *and* an incompatible constraint, all at once, was judged too narrow an
+  edge case to justify the added complexity for now.) The constraint check only runs in the
   server project's own build (it needs `IFormFile` itself to be resolvable to check against) —
   the same interface method is independently parsed there regardless of where else it's
   referenced from, so the check still fires at the point it's actually decidable.
@@ -128,17 +140,19 @@ Task<ModDto> UploadWithGallery(
   what a multipart file part needs to be built correctly. The caller owns the `Stream` and is
   responsible for disposing it once the call completes, same as any other API taking a
   caller-supplied stream.
-- `FormFile<TMetadata>` attaches an arbitrary runtime value to the upload, for when the caller
-  needs to correlate it with local state (UI context, progress tracking, retry bookkeeping):
-
-  ```csharp
-  [File] FormFile<UploadContext> screenshot
-  // call site: new FormFile<UploadContext>(stream, "pic.png", Metadata: new UploadContext(...))
-  ```
-
-  `TMetadata` never reaches the server or changes the wire contract — `[File]` binds to
-  `IFormFile` server-side either way, exactly as it does for plain `FormFile`. If the data
-  genuinely needs to reach the server, send it as an ordinary `[Form]` field instead.
+- `FileWithData<TData>` pairs a `FormFile` with an arbitrary `TData` value that's genuinely sent
+  to and readable by the server — the tool for exactly the case a second, parallel list of data
+  next to a list of files gets messy and error-prone (nothing guarantees the two lists stay the
+  same length or order, so a dropped/reordered item silently pairs the wrong data with the wrong
+  file). `TData` can be any type; it's JSON-serialized into its own multipart field, correlated
+  with the file by field name — `photos[0].file`/`photos[0].data`, `photos[1].file`/
+  `photos[1].data`, and so on for the multi-file case, or `photo.file`/`photo.data` for a single
+  one — never by list position. The generated controller base gets its own nested
+  `FileWithData<TData>` record (reconstructed by a generated model binder from the matching file
+  and data parts); reference it from a concrete controller/service by simple name if you inherit
+  from the base, or `{Stem}ApiControllerBase.FileWithData<TData>` if you don't. For a *single*
+  file, you don't need this at all — just add more `[Form]` fields alongside the `[File]`
+  parameter, as `UploadWithScreenshot` above does.
 - `[Body]` and `[Form]`/`[File]` can't be combined on the same method — an HTTP request only has
   one content type (RG0009).
 - There's no attribute for request size limits; that stays a hosting/infrastructure concern
