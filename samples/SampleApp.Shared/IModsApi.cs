@@ -27,8 +27,8 @@ public partial interface IModsApi
     [Authorize]
     Task<ModDto> UploadWithScreenshot(
         [Form] string name,
-        [Form] FileInfo fileInfo,
-        [File] FormFile formFile,
+        [Form] string description,
+        [File] FormFile screenshot,
         CancellationToken ct = default);
 
     // [File] on an IReadOnlyList<FileWithData<TData>>? parameter is where FileWithData<TData>
