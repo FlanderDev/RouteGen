@@ -1,4 +1,4 @@
-﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -12,7 +12,7 @@ namespace FlanderDev.RouteGen.Migration;
 /// (which needs the full translated model), so the two can never silently disagree about what
 /// counts as migratable.
 /// </summary>
-public static class ControllerMigrationReader
+internal static class ControllerMigrationReader
 {
     private static readonly SymbolDisplayFormat FullyQualified =
         SymbolDisplayFormat.FullyQualifiedFormat.WithMiscellaneousOptions(

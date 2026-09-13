@@ -93,3 +93,13 @@ Everything else translates directly:
 ## License
 
 MIT
+
+---
+
+*Implementation note: this package is actually two assemblies under the hood —
+`FlanderDev.RouteGen.Migration` (the analyzer) and `FlanderDev.RouteGen.Migration.CodeFixes` (the
+code fix), packed together into the one NuGet package `dotnet add package` installs. They're
+split because the code fix needs `Microsoft.CodeAnalysis.CSharp.Workspaces` for solution-editing
+APIs, and an assembly containing a `DiagnosticAnalyzer` shouldn't reference that package (Roslyn's
+own RS1038 rule) — some hosts that load analyzers don't provide Workspaces assemblies at all. You
+should never need to reference the CodeFixes assembly directly.*

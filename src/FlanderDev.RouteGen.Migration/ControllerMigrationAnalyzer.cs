@@ -10,7 +10,8 @@ namespace FlanderDev.RouteGen.Migration;
 /// attribute-routed controller with at least one migratable action, unless a type named
 /// "I{Stem}Api" already exists anywhere in the solution -- see
 /// <see cref="ControllerMigrationReader"/> for the shared detection/translation logic this and
-/// <see cref="ControllerMigrationCodeFixProvider"/> both build on.
+/// the code fix (in the separate FlanderDev.RouteGen.Migration.CodeFixes assembly -- see this
+/// project's csproj for why) both build on.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class ControllerMigrationAnalyzer : DiagnosticAnalyzer

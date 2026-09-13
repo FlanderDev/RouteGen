@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 namespace FlanderDev.RouteGen.Migration;
 
@@ -6,7 +6,7 @@ namespace FlanderDev.RouteGen.Migration;
 /// <param name="namespace">The controller's containing namespace.</param>
 /// <param name="controllerName">The controller class's simple name, e.g. "ModsController".</param>
 /// <param name="baseRoute">The resolved base route (with any "[controller]" token already substituted).</param>
-public sealed class ControllerMigrationModel(string @namespace, string controllerName, string baseRoute)
+internal sealed class ControllerMigrationModel(string @namespace, string controllerName, string baseRoute)
 {
     /// <summary>The controller's containing namespace.</summary>
     public string Namespace { get; } = @namespace;
@@ -38,7 +38,7 @@ public sealed class ControllerMigrationModel(string @namespace, string controlle
 /// <param name="name">The action method's name.</param>
 /// <param name="verb">The RouteGen verb attribute name to emit, e.g. "Get".</param>
 /// <param name="routeSuffix">The route template suffix (with any "[action]" token already substituted), if any.</param>
-public sealed class ActionMigrationModel(string name, string verb, string? routeSuffix)
+internal sealed class ActionMigrationModel(string name, string verb, string? routeSuffix)
 {
     /// <summary>The action method's name.</summary>
     public string Name { get; } = name;
@@ -79,7 +79,7 @@ public sealed class ActionMigrationModel(string name, string verb, string? route
 }
 
 /// <summary>How a migrated parameter should be bound in the generated RouteGen interface.</summary>
-public enum MigratedParameterKind
+internal enum MigratedParameterKind
 {
     /// <summary>Becomes a route-matched parameter (no attribute needed; RouteGen infers it from the route template).</summary>
     Route,
@@ -108,7 +108,7 @@ public enum MigratedParameterKind
 /// "IReadOnlyList&lt;FormFile&gt;", not the original IFormFile-shaped ASP.NET Core type.
 /// </param>
 /// <param name="kind">How this parameter should be bound in the generated interface.</param>
-public sealed class ActionParameterMigrationModel(string name, string typeFullName, MigratedParameterKind kind)
+internal sealed class ActionParameterMigrationModel(string name, string typeFullName, MigratedParameterKind kind)
 {
     /// <summary>The parameter's name.</summary>
     public string Name { get; } = name;
