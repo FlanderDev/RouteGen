@@ -298,7 +298,12 @@ internal static class ApiInterfaceReader
             else if (isForm)
             {
                 paramModel.Kind = ParameterKind.Form;
-                CheckSimpleType(paramType, param, method, diagnostics);
+                // No type restriction here (unlike [Query]/route parameters, which still go
+                // through CheckSimpleType/RG0006): a simple-typed field is sent as a plain
+                // string; anything else is JSON-serialized into the field instead. IsSimpleType
+                // just records which path the emitters should take, it is never a reason to
+                // reject the parameter for [Form].
+                paramModel.IsSimpleType = IsSimpleType(paramType);
             }
             else if (matches)
             {
@@ -358,7 +363,7 @@ internal static class ApiInterfaceReader
 
     /// <summary>
     /// Gives a <see cref="ParameterKind.CancellationToken"/> parameter a <c>= default</c> value
-    /// -- but only when doing so can't push some later, still-required parameter into an invalid
+    ///, but only when doing so can't push some later, still-required parameter into an invalid
     /// "required after optional" position (CS1737). Scans right to left so the decision accounts
     /// for every parameter that follows, not just the immediate next one; a CancellationToken
     /// with a genuinely required parameter after it (itself already legal C#, since neither has
@@ -392,17 +397,17 @@ internal static class ApiInterfaceReader
     /// for <c>FileWithData&lt;TData&gt;</c>).
     ///
     /// A single file (or file+data pair) is always safe. For multiple files, only shapes ASP.NET
-    /// Core's own model binder is verified to construct without throwing are accepted -- confirmed
+    /// Core's own model binder is verified to construct without throwing are accepted, confirmed
     /// against <c>ModelBindingHelper.GetCompatibleCollection&lt;T&gt;</c>
     /// (https://github.com/dotnet/aspnetcore/blob/main/src/Mvc/Mvc.Core/src/ModelBinding/ModelBindingHelper.cs),
     /// which the framework's own <c>FormFileModelBinder</c> uses for every multi-file parameter:
-    ///   - <c>T[]</c> -- always works (a <c>List&lt;T&gt;</c> is bound, then copied to an array).
+    ///   - <c>T[]</c>, always works (a <c>List&lt;T&gt;</c> is bound, then copied to an array).
     ///   - Any of <c>IEnumerable&lt;T&gt;</c>, <c>ICollection&lt;T&gt;</c>, <c>IList&lt;T&gt;</c>,
     ///     <c>IReadOnlyCollection&lt;T&gt;</c>, <c>IReadOnlyList&lt;T&gt;</c>, or <c>List&lt;T&gt;</c>
-    ///     itself -- always works (a <c>List&lt;T&gt;</c> is bound and assigned directly, since
+    ///     itself, always works (a <c>List&lt;T&gt;</c> is bound and assigned directly, since
     ///     <c>List&lt;T&gt;</c> is assignable to every one of these).
     ///   - Any OTHER concrete, non-abstract, generic collection class closed over
-    ///     <c>FormFile</c> -- works ONLY if it has an accessible public parameterless constructor
+    ///     <c>FormFile</c>, works ONLY if it has an accessible public parameterless constructor
     ///     AND implements <c>ICollection&lt;T&gt;</c>, since the binder falls back to
     ///     <c>(ICollection&lt;T&gt;)Activator.CreateInstance(modelType)</c> for anything that
     ///     isn't one of the shapes above. Types that satisfy <c>ICollection&lt;T&gt;</c>
@@ -410,17 +415,17 @@ internal static class ApiInterfaceReader
     ///     which has no public constructor at all) pass ASP.NET Core's own
     ///     <c>CanGetCompatibleCollection&lt;T&gt;</c> check but then throw
     ///     <c>MissingMethodException</c> from <c>GetCompatibleCollection&lt;T&gt;</c> at request
-    ///     time -- RouteGen checks the constructor explicitly so this fails at compile time
+    ///     time, RouteGen checks the constructor explicitly so this fails at compile time
     ///     instead, as RG0010, rather than reproducing that runtime landmine. This custom-collection
     ///     path applies identically whether the element type is <c>FormFile</c> or
     ///     <c>FileWithData&lt;TData&gt;</c>, EXCEPT the RG0011 generic-constraint check (see
     ///     <see cref="TryFindIncompatibleConstraint"/>), which only runs for a <c>FormFile</c>
-    ///     element -- extending it to a <c>FileWithData&lt;TData&gt;</c> element (a custom
+    ///     element, extending it to a <c>FileWithData&lt;TData&gt;</c> element (a custom
     ///     collection AND a paired-data file AND an incompatible generic constraint, all at once)
     ///     was judged too narrow an edge case to justify the added complexity for v1.
     ///   - A non-generic concrete collection type hardcoded to a <c>FormFile</c> element type
     ///     (e.g. a hand-written <c>class Gallery : List&lt;FormFile&gt;</c>) can never be
-    ///     mirrored -- there is no way to construct an analogous type closed over <c>IFormFile</c>
+    ///     mirrored, there is no way to construct an analogous type closed over <c>IFormFile</c>
     ///     instead, so these are always rejected (RG0010).
     /// </summary>
     private static bool TryGetFileParameterShape(
@@ -509,7 +514,7 @@ internal static class ApiInterfaceReader
             }
 
             // Anything else: only safe if ASP.NET Core can actually Activator.CreateInstance it
-            // and treat it as an ICollection<T> -- see the constructor/interface checks below.
+            // and treat it as an ICollection<T>, see the constructor/interface checks below.
         bool hasPublicParameterlessCtor = namedCollection.InstanceConstructors
                 .Any(c => c.Parameters.IsEmpty && c.DeclaredAccessibility == Accessibility.Public);
         bool implementsMatchingICollection = namedCollection.AllInterfaces.Any(i =>
@@ -521,7 +526,7 @@ internal static class ApiInterfaceReader
             {
                 // RG0011: even though the shape is otherwise valid, substituting IFormFile in for
                 // this custom collection's type parameter could still be an invalid closed generic
-                // type server-side (e.g. a plausible `where T : FormFile` constraint) -- only
+                // type server-side (e.g. a plausible `where T : FormFile` constraint), only
             // checked when IFormFile itself is resolvable (the server compilation) and only for
             // a FormFile element (see this method's own doc comment for why FileWithData<TData>
             // elements skip this check for now).
@@ -542,7 +547,7 @@ internal static class ApiInterfaceReader
     /// Checks whether <paramref name="formFileType"/> (IFormFile) would actually satisfy the
     /// generic constraints on <paramref name="named"/>'s (single) type parameter. A plausible
     /// <c>where T : FormFile</c> on a custom collection type would make the mirrored
-    /// <c>MyBag&lt;IFormFile&gt;</c> an invalid closed generic type -- without this check, that
+    /// <c>MyBag&lt;IFormFile&gt;</c> an invalid closed generic type, without this check, that
     /// would surface as a confusing raw generic-constraint compiler error in the generated server
     /// file, rather than a clear, RouteGen-specific diagnostic (RG0011) pointing at the actual
     /// interface method that declared the incompatible <c>[File]</c> parameter.
@@ -606,8 +611,8 @@ internal static class ApiInterfaceReader
 
     /// <summary>
     /// True when <paramref name="type"/> can hold null at runtime: a nullable reference type, a
-    /// nullable value type (<c>Nullable&lt;T&gt;</c>), or -- defensively, since <c>default</c>
-    /// means null for those two cases just as much as it means zero for a plain value type -- a
+    /// nullable value type (<c>Nullable&lt;T&gt;</c>), or, defensively, since <c>default</c>
+    /// means null for those two cases just as much as it means zero for a plain value type, a
     /// parameter whose declared default value is literally null.
     /// </summary>
     private static bool IsNullableType(ITypeSymbol type, IParameterSymbol? param)
@@ -628,7 +633,7 @@ internal static class ApiInterfaceReader
     /// True when <paramref name="type"/> (unwrapping <c>Nullable&lt;T&gt;</c> first) formats
     /// differently depending on the current thread's culture: every numeric type, plus
     /// DateTime/DateTimeOffset/TimeSpan/DateOnly/TimeOnly. Deliberately excludes string, bool,
-    /// char, Guid, and enum -- none of those are meaningfully culture-sensitive (Guid's format is
+    /// char, Guid, and enum, none of those are meaningfully culture-sensitive (Guid's format is
     /// fixed regardless of culture; the others either have no culture-aware ToString overload at
     /// all, or their output doesn't vary by culture). The client emitter uses this to decide
     /// whether a value's ToString() call needs an explicit CultureInfo.InvariantCulture: without
@@ -660,25 +665,29 @@ internal static class ApiInterfaceReader
             "global::System.TimeSpan" or "global::System.DateOnly" or "global::System.TimeOnly";
     }
 
-    /// <summary>Reports <see cref="RouteGenDiagnostics.UnsupportedSimpleType"/> unless <paramref name="type"/> is a route/query-safe simple type (primitive, string, enum, Guid, DateTime, etc.), optionally nullable.</summary>
-    private static void CheckSimpleType(
-        ITypeSymbol type,
-        IParameterSymbol param,
-        IMethodSymbol method,
-        List<Diagnostic> diagnostics)
+    /// <summary>True when <paramref name="type"/> (unwrapping <c>Nullable&lt;T&gt;</c> first) is a route/query-safe simple type: a primitive, string, enum, Guid, DateTime, or similar.</summary>
+    private static bool IsSimpleType(ITypeSymbol type)
     {
         var underlying = type;
 
         if (underlying is INamedTypeSymbol { Name: "Nullable", IsGenericType: true } nullable)
             underlying = nullable.TypeArguments[0];
 
-        bool ok = underlying.TypeKind == TypeKind.Enum
+        return underlying.TypeKind == TypeKind.Enum
             || SimpleSpecialTypes.Contains(underlying.SpecialType)
             || underlying.ToDisplayString(FullyQualified) is
                 "global::System.Guid" or "global::System.DateTime" or "global::System.DateTimeOffset"
                 or "global::System.TimeSpan" or "global::System.DateOnly" or "global::System.TimeOnly";
+    }
 
-        if (!ok)
+    /// <summary>Reports <see cref="RouteGenDiagnostics.UnsupportedSimpleType"/> unless <see cref="IsSimpleType"/> is true for <paramref name="type"/>. Used for route/query parameters only, <c>[Form]</c> has no such restriction, see <see cref="ApiParameterModel.IsSimpleType"/>.</summary>
+    private static void CheckSimpleType(
+        ITypeSymbol type,
+        IParameterSymbol param,
+        IMethodSymbol method,
+        List<Diagnostic> diagnostics)
+    {
+        if (!IsSimpleType(type))
         {
             diagnostics.Add(Diagnostic.Create(
                 RouteGenDiagnostics.UnsupportedSimpleType,
@@ -691,7 +700,7 @@ internal static class ApiInterfaceReader
 
     /// <summary>
     /// True when <paramref name="attributeType"/> is the RouteGen attribute named
-    /// <paramref name="simpleName"/> specifically -- i.e. it also lives in
+    /// <paramref name="simpleName"/> specifically, i.e. it also lives in
     /// FlanderDev.RouteGen.Abstractions, not just any type from any assembly that happens to
     /// share the same simple name. Shared with <see cref="ApiContractGenerator"/> (via internal
     /// accessibility) rather than duplicated, so both places can't silently drift apart.
@@ -716,7 +725,7 @@ internal static class ApiInterfaceReader
     /// is flagged as worth double-checking rather than asserted as broken.
     /// Deliberately does not attempt to reason about optional route parameters creating
     /// variable-length effective routes (e.g. "{id:int?}" also matching a shorter sibling route)
-    /// -- that requires modeling ASP.NET Core's actual precedence rules, not just comparing
+    ///, that requires modeling ASP.NET Core's actual precedence rules, not just comparing
     /// parsed shapes, and is out of scope for this pass.
     /// </summary>
     private static void DetectRouteCollisions(

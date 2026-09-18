@@ -163,6 +163,16 @@ internal sealed class ApiParameterModel(string name, string typeFullName)
     /// </summary>
     public bool IsCultureSensitive { get; set; }
 
+    /// <summary>
+    /// True when this parameter's type is a route/query-safe simple type (primitive, string,
+    /// enum, Guid, DateTime, etc.), optionally nullable. Meaningful only for
+    /// <see cref="ParameterKind.Form"/>: a simple-typed <c>[Form]</c> field is sent/bound as a
+    /// plain string (unchanged behavior); anything else is JSON-serialized into the field
+    /// instead, since <c>[Form]</c> places no type restriction the way RG0006 enforces for
+    /// <see cref="ParameterKind.Query"/>/<see cref="ParameterKind.RouteOrAuto"/>.
+    /// </summary>
+    public bool IsSimpleType { get; set; }
+
     /// <summary>True when the interface method declared an explicit default value for this parameter.</summary>
     public bool HasDefaultValue { get; set; }
 

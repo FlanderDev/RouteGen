@@ -6,7 +6,7 @@ namespace FlanderDev.RouteGen.Migration;
 
 /// <summary>
 /// Reads an attribute-routed ASP.NET Core controller and translates it into a
-/// <see cref="ControllerMigrationModel"/> -- the reverse of what <c>ApiInterfaceReader</c> (in
+/// <see cref="ControllerMigrationModel"/>, the reverse of what <c>ApiInterfaceReader</c> (in
 /// RouteGen.Generators) does. Shared between <see cref="ControllerMigrationAnalyzer"/> (which
 /// only needs "does at least one action qualify") and <see cref="ControllerMigrationCodeFixProvider"/>
 /// (which needs the full translated model), so the two can never silently disagree about what
@@ -48,7 +48,7 @@ internal static class ControllerMigrationReader
 
     /// <summary>
     /// True when a type named <paramref name="simpleName"/> already exists anywhere visible to
-    /// <paramref name="compilation"/> (its own assembly or any referenced one) -- used to suppress
+    /// <paramref name="compilation"/> (its own assembly or any referenced one), used to suppress
     /// RGM0001 once a controller's interface has already been generated, even before the user has
     /// done the manual step of rewriting the controller itself to stop matching this diagnostic.
     /// </summary>
@@ -77,7 +77,7 @@ internal static class ControllerMigrationReader
         foreach (var method in controllerType.GetMembers().OfType<IMethodSymbol>())
         {
             var httpAttrs = GetHttpVerbAttributes(method).ToList();
-            if (httpAttrs.Count == 0) continue; // not an action -- not a skip, just not applicable.
+            if (httpAttrs.Count == 0) continue; // not an action, not a skip, just not applicable.
 
             if (TryBuildAction(method, httpAttrs, baseRoute, out var action, out string? skipReason))
             {
@@ -119,7 +119,7 @@ internal static class ControllerMigrationReader
             "HttpGetAttribute" or "HttpPostAttribute" or "HttpPutAttribute" or
             "HttpDeleteAttribute" or "HttpPatchAttribute");
 
-    /// <summary>Translates one action method. Returns false (with a human-readable reason) for anything RouteGen has no vocabulary for -- see the class-level remarks on the skip/carry-over split.</summary>
+    /// <summary>Translates one action method. Returns false (with a human-readable reason) for anything RouteGen has no vocabulary for, see the class-level remarks on the skip/carry-over split.</summary>
     private static bool TryBuildAction(
         IMethodSymbol method,
         List<AttributeData> httpAttrs,
@@ -149,7 +149,7 @@ internal static class ControllerMigrationReader
             ? httpAttrs[0].ConstructorArguments[0].Value as string
             : null;
 
-        // "[action]" always resolves unambiguously to the current action's own name -- unlike
+        // "[action]" always resolves unambiguously to the current action's own name, unlike
         // "[controller]", there's no scenario where this token is genuinely ambiguous.
         if (routeSuffix is not null)
             routeSuffix = routeSuffix.Replace("[action]", method.Name);
@@ -178,7 +178,7 @@ internal static class ControllerMigrationReader
             {
                 model.DroppedAttributeNotes.Add(
                     "[" + name!.Substring(0, name.Length - "Attribute".Length) +
-                    "] was dropped -- RouteGen doesn't model this; add it back on the concrete controller after migration if still needed");
+                    "] was dropped, RouteGen doesn't model this; add it back on the concrete controller after migration if still needed");
             }
         }
 
@@ -219,7 +219,7 @@ internal static class ControllerMigrationReader
         if (unwrapped is INamedTypeSymbol { Name: "Task", IsGenericType: true } taskT)
             unwrapped = taskT.TypeArguments[0];
         else if (unwrapped is INamedTypeSymbol { Name: "Task", IsGenericType: false })
-            unwrapped = null; // bare Task -- no response body, nothing further to resolve.
+            unwrapped = null; // bare Task, no response body, nothing further to resolve.
 
         if (unwrapped is INamedTypeSymbol { Name: "ActionResult", IsGenericType: true } actionResultT)
         {
@@ -386,7 +386,7 @@ internal static class ControllerMigrationReader
         return false;
     }
 
-    /// <summary>True for primitives, string, enum, Guid, DateTime, and similar simple types -- the same rule RouteGen.Generators uses for [Query]/route parameters, duplicated here rather than referenced so this package has no dependency on Generators' internal (and unstable-shape) classes.</summary>
+    /// <summary>True for primitives, string, enum, Guid, DateTime, and similar simple types, the same rule RouteGen.Generators uses for [Query]/route parameters, duplicated here rather than referenced so this package has no dependency on Generators' internal (and unstable-shape) classes.</summary>
     private static bool IsSimpleType(ITypeSymbol type)
     {
         var underlying = type;
@@ -450,7 +450,7 @@ internal static class ControllerMigrationReader
             CollectIfLocal(action.ResponseTypeFullName, controllerAssembly, localTypeNames);
     }
 
-    /// <summary>Best-effort: strips common wrapper syntax (nullable "?", array "[]", one level of generic "&lt;T&gt;") to get at a plausible leaf type name, then checks whether the ORIGINAL fully-qualified text's namespace matches the controller's own assembly's default namespace as a heuristic. This is intentionally approximate -- see remarks in <see cref="MigratedInterfaceEmitter"/> on why it's a comment, not a build-breaking check.</summary>
+    /// <summary>Best-effort: strips common wrapper syntax (nullable "?", array "[]", one level of generic "&lt;T&gt;") to get at a plausible leaf type name, then checks whether the ORIGINAL fully-qualified text's namespace matches the controller's own assembly's default namespace as a heuristic. This is intentionally approximate, see remarks in <see cref="MigratedInterfaceEmitter"/> on why it's a comment, not a build-breaking check.</summary>
     private static void CollectIfLocal(string typeFullName, IAssemblySymbol controllerAssembly, List<string> localTypeNames)
     {
         string leaf = typeFullName.TrimEnd('?').TrimEnd('[', ']');
@@ -459,7 +459,7 @@ internal static class ControllerMigrationReader
         if (genericStart >= 0)
         {
             // Only look at the outer container for this heuristic; nested generic arguments
-            // aren't walked further (kept deliberately simple -- see the emitter's remarks).
+            // aren't walked further (kept deliberately simple, see the emitter's remarks).
             leaf = leaf.Substring(0, genericStart);
         }
 
@@ -482,7 +482,7 @@ internal static class ControllerMigrationReader
             ? baseRoute
             : baseRoute.TrimEnd('/') + "/" + suffix!.TrimStart('/');
 
-    /// <summary>Extracts every "{name}"/"{name:constraint}" token's name from a route template -- names only, not full parsing, since that's all parameter-kind inference needs.</summary>
+    /// <summary>Extracts every "{name}"/"{name:constraint}" token's name from a route template, names only, not full parsing, since that's all parameter-kind inference needs.</summary>
     private static HashSet<string> ExtractRouteTokenNames(string route)
     {
         var names = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);

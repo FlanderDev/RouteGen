@@ -1,6 +1,6 @@
 <Project>
   <!--
-    Nothing required here today -- the analyzer + code fix are wired up automatically because the
+    Nothing required here today, the analyzer + code fix are wired up automatically because the
     assembly is packaged under analyzers/dotnet/cs, the same as RouteGen.Generators. This file
     exists as a documented extension point (e.g. future MSBuild properties for tuning which
     attributes are treated as safe-to-drop vs. hard-skip during migration) so consumers don't

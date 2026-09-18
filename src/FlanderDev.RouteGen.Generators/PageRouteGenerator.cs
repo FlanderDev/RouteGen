@@ -72,7 +72,7 @@ public sealed class PageRouteGenerator : IIncrementalGenerator
                 if (page.MemberName is null)
             {
                     // A route beyond the first with no matching two-argument [GeneratedPathName]
-                    // override -- there's no reasonable name to infer, so this is an error rather
+                    // override, there's no reasonable name to infer, so this is an error rather
                     // than a silently-dropped route (the bug this whole path exists to prevent).
                     spc.ReportDiagnostic(Diagnostic.Create(
                         RouteGenDiagnostics.UnnamedAdditionalPageRoute,
@@ -107,7 +107,7 @@ public sealed class PageRouteGenerator : IIncrementalGenerator
     /// <see cref="PageRouteInfo.MemberName"/> is always resolved (falling back to the filename),
     /// but every route after it has a null <see cref="PageRouteInfo.MemberName"/> unless a
     /// matching two-argument <c>[GeneratedPathName]</c> override was found for that exact route
-    /// text -- the caller turns an unresolved name into diagnostic RG0012.
+    /// text, the caller turns an unresolved name into diagnostic RG0012.
     /// </summary>
     private static List<PageRouteInfo> ParsePages(
         AdditionalText text,
@@ -132,12 +132,12 @@ public sealed class PageRouteGenerator : IIncrementalGenerator
 
             if (secondGroup.Success)
             {
-                // Two-argument form: (route, name) -- keyed by the exact route text.
+                // Two-argument form: (route, name), keyed by the exact route text.
                 routeNameOverrides[first] = secondGroup.Value;
             }
             else
             {
-                // One-argument form: (name) -- applies to the component's first route. If there
+                // One-argument form: (name), applies to the component's first route. If there
                 // happens to be more than one of these on the same component, the first one found
                 // wins; that's an unusual enough thing to write that it doesn't warrant its own
                 // diagnostic.
@@ -160,13 +160,13 @@ public sealed class PageRouteGenerator : IIncrementalGenerator
             else if (i == 0)
             {
                 // The first route falls back to the filename-derived name (and may also use the
-                // one-argument override) -- unchanged from before multi-route support existed, so
+                // one-argument override), unchanged from before multi-route support existed, so
                 // every existing single-route component behaves exactly as it did before.
                 memberName = legacyName ?? SanitizeIdentifier(fileName);
             }
             else
             {
-                memberName = null; // unresolved -- RG0012 in the caller.
+                memberName = null; // unresolved, RG0012 in the caller.
     }
 
             result.Add(new PageRouteInfo(memberName, route, template, text.Path));
@@ -204,8 +204,8 @@ public sealed class PageRouteGenerator : IIncrementalGenerator
         sb.AppendLine("#nullable enable");
         sb.AppendLine("using System;");
         sb.AppendLine();
-        sb.Append("namespace ").Append(rootNamespace).AppendLine(".Generated");
-        sb.AppendLine("{");
+        sb.Append("namespace ").Append(rootNamespace).AppendLine(";");
+        sb.AppendLine();
         sb.AppendLine("    public static class Paths");
         sb.AppendLine("    {");
 
@@ -244,7 +244,6 @@ public sealed class PageRouteGenerator : IIncrementalGenerator
             }
         }
 
-        sb.AppendLine("    }");
         sb.AppendLine("}");
 
         return sb.ToString();
@@ -296,7 +295,7 @@ public sealed class PageRouteGenerator : IIncrementalGenerator
     {
         if (constraint is null) return "string";
 
-        // Constraints can be chained, e.g. "int:min(1)" for {id:int:min(1)} -- RouteTemplateParser
+        // Constraints can be chained, e.g. "int:min(1)" for {id:int:min(1)}, RouteTemplateParser
         // deliberately keeps the whole chain as one opaque string (by design; see its remarks),
         // so only the first segment (the one that actually determines the underlying CLR type;
         // everything chained after it, like min/max/range/regex, is a refinement that doesn't
