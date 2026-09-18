@@ -22,11 +22,11 @@ internal static class ServerControllerEmitter
         bool hasNamespace = !string.IsNullOrEmpty(model.Namespace);
         if (hasNamespace)
         {
-            sb.Append("namespace ").Append(model.Namespace).AppendLine();
-            sb.AppendLine("{");
+            sb.Append("namespace ").Append(model.Namespace).AppendLine(";");
+            sb.AppendLine();
         }
 
-        string indent = hasNamespace ? "    " : "";
+        const string indent = ""; // file-scoped namespace: no extra nesting level needed
         string className = model.ShortName + "ApiControllerBase";
 
         sb.Append(indent).Append('[').Append("Route(\"").Append(EscapeString(model.BaseRoute)).Append("\")]").AppendLine();
@@ -39,8 +39,14 @@ internal static class ServerControllerEmitter
         bool needsFileWithData = model.Methods.Any(m =>
             m.Parameters.Any(p => p.Kind == ParameterKind.File && p.IsFileWithData));
 
+        bool needsJsonFormBinder = model.Methods.Any(m =>
+            m.Parameters.Any(p => p.Kind == ParameterKind.Form && !p.IsSimpleType));
+
         if (needsFileWithData)
             EmitFileWithDataSupport(sb, indent + "    ");
+
+        if (needsJsonFormBinder)
+            EmitJsonFormFieldBinder(sb, indent + "    ");
 
         foreach (var method in model.Methods)
         {
@@ -49,15 +55,13 @@ internal static class ServerControllerEmitter
 
         sb.Append(indent).AppendLine("}");
 
-        if (hasNamespace) sb.AppendLine("}");
-
         return sb.ToString();
     }
 
     /// <summary>
     /// Emits the nested <c>FileWithData&lt;TData&gt;</c> record plus the two generic
     /// <see cref="IModelBinder"/>s (single and list) that reconstruct it from a file part and a
-    /// JSON-serialized data part correlated by field name -- <c>{name}.file</c>/<c>{name}.data</c>
+    /// JSON-serialized data part correlated by field name, <c>{name}.file</c>/<c>{name}.data</c>
     /// for a single parameter, <c>{name}[0].file</c>/<c>{name}[0].data</c> (and so on) for a
     /// list. Nested inside the controller base (rather than a shared external type) so multiple
     /// generated controllers never collide on the name, and generic over <c>TData</c> so one
@@ -143,6 +147,48 @@ internal static class ServerControllerEmitter
         sb.AppendLine();
     }
 
+    /// <summary>
+    /// Emits a nested <see cref="IModelBinder"/> that reads a raw <c>multipart/form-data</c>
+    /// field and JSON-deserializes it into the target parameter type. Used for <c>[Form]</c>
+    /// parameters whose type isn't simple (<see cref="ApiParameterModel.IsSimpleType"/> false),
+    /// which, unlike a plain <c>[FromForm]</c> simple-type field, have no meaningful
+    /// per-property multipart binding without one. Nested inside the controller base (rather
+    /// than a single shared type) purely so multiple generated controllers never collide on the
+    /// name; reads directly from <c>Request.Form</c> rather than the composite value provider so
+    /// it can never accidentally bind from the route or query string instead.
+    /// </summary>
+    private static void EmitJsonFormFieldBinder(StringBuilder sb, string indent)
+    {
+        sb.Append(indent).AppendLine("private sealed class JsonFormFieldBinder : IModelBinder");
+        sb.Append(indent).AppendLine("{");
+        sb.Append(indent).AppendLine("    public System.Threading.Tasks.Task BindModelAsync(ModelBindingContext bindingContext)");
+        sb.Append(indent).AppendLine("    {");
+        sb.Append(indent).AppendLine("        var valueProviderResult = bindingContext.HttpContext.Request.Form.TryGetValue(bindingContext.FieldName, out var values) ? values : Microsoft.Extensions.Primitives.StringValues.Empty;");
+        sb.Append(indent).AppendLine("        string? raw = valueProviderResult.Count > 0 ? valueProviderResult.ToString() : null;");
+        sb.AppendLine();
+        sb.Append(indent).AppendLine("        if (string.IsNullOrEmpty(raw))");
+        sb.Append(indent).AppendLine("        {");
+        sb.Append(indent).AppendLine("            bindingContext.Result = ModelBindingResult.Success(null);");
+        sb.Append(indent).AppendLine("            return System.Threading.Tasks.Task.CompletedTask;");
+        sb.Append(indent).AppendLine("        }");
+        sb.AppendLine();
+        sb.Append(indent).AppendLine("        try");
+        sb.Append(indent).AppendLine("        {");
+        sb.Append(indent).AppendLine("            var model = System.Text.Json.JsonSerializer.Deserialize(raw, bindingContext.ModelType);");
+        sb.Append(indent).AppendLine("            bindingContext.Result = ModelBindingResult.Success(model);");
+        sb.Append(indent).AppendLine("        }");
+        sb.Append(indent).AppendLine("        catch (System.Text.Json.JsonException ex)");
+        sb.Append(indent).AppendLine("        {");
+        sb.Append(indent).AppendLine("            bindingContext.ModelState.TryAddModelError(bindingContext.ModelName, $\"Invalid JSON for form field '{bindingContext.FieldName}': {ex.Message}\");");
+        sb.Append(indent).AppendLine("            bindingContext.Result = ModelBindingResult.Failed();");
+        sb.Append(indent).AppendLine("        }");
+        sb.AppendLine();
+        sb.Append(indent).AppendLine("        return System.Threading.Tasks.Task.CompletedTask;");
+        sb.Append(indent).AppendLine("    }");
+        sb.Append(indent).AppendLine("}");
+        sb.AppendLine();
+    }
+
     /// <summary>Emits one abstract action method (verb/route/authorization attributes plus the signature) for <paramref name="method"/>.</summary>
     private static void EmitControllerMethod(StringBuilder sb, string indent, ApiMethodModel method)
     {
@@ -198,7 +244,7 @@ internal static class ServerControllerEmitter
         {
             // AssignCancellationTokenDefault (in ApiInterfaceReader) already decided whether this
             // can safely get a default without pushing a later required parameter into an
-            // invalid "required after optional" position (CS1737) -- respect that decision
+            // invalid "required after optional" position (CS1737), respect that decision
             // exactly, the same as every other parameter kind, instead of forcing one here.
             string ctDefault = p.HasDefaultValue ? " = " + p.DefaultValueLiteral : "";
             return "global::System.Threading.CancellationToken " + p.Name + ctDefault;
@@ -212,7 +258,7 @@ internal static class ServerControllerEmitter
             // for this Kind. ServerFileTypeFullName was computed at parse time to mirror the
             // client's exact shape (array/List<>/IEnumerable<>/etc., FormFile or FileWithData<T>)
             // wherever ASP.NET Core's model binder (or RouteGen's own generated one, for
-            // FileWithData<T>) is verified to support it -- see TryGetFileParameterShape.
+            // FileWithData<T>) is verified to support it, see TryGetFileParameterShape.
             string fileType = p.ServerFileTypeFullName!;
 
             if (p.IsNullable) fileType += "?";
@@ -234,7 +280,14 @@ internal static class ServerControllerEmitter
         {
             ParameterKind.Body => "[FromBody] ",
             ParameterKind.Query => "[FromQuery] ",
-            ParameterKind.Form => "[FromForm] ",
+            // A simple-typed [Form] field binds via the ordinary [FromForm] path, unchanged.
+            // A complex one has no meaningful per-property multipart shape, so it's JSON inside
+            // one field instead, bound via the nested JsonFormFieldBinder emitted above rather
+            // than [FromForm], since ModelBinderAttribute and FromFormAttribute can't be combined
+            // on the same parameter.
+            ParameterKind.Form => p.IsSimpleType
+                ? "[FromForm] "
+                : "[ModelBinder(BinderType = typeof(JsonFormFieldBinder))] ",
             ParameterKind.RouteOrAuto => "[FromRoute] ",
             _ => ""
         };

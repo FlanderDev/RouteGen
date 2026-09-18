@@ -26,7 +26,7 @@ internal static class RouteGenDiagnostics
         category: Category,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "Two routes have identical literal text and the same parameter positions, but at least one of those positions is constrained on one route and unconstrained (or differently constrained) on the other. ASP.NET Core CAN disambiguate many such pairs via constraint precedence, so this isn't asserted as a guaranteed runtime collision the way RG0001 is -- it's a nudge to verify the specific inputs you expect can't match both.");
+        description: "Two routes have identical literal text and the same parameter positions, but at least one of those positions is constrained on one route and unconstrained (or differently constrained) on the other. ASP.NET Core CAN disambiguate many such pairs via constraint precedence, so this isn't asserted as a guaranteed runtime collision the way RG0001 is, it's a nudge to verify the specific inputs you expect can't match both.");
 
     /// <summary>RG0002: a <c>[Body]</c> parameter is used on a GET/DELETE method (warning).</summary>
     public static readonly DiagnosticDescriptor BodyOnNonBodyVerb = new(
@@ -71,12 +71,12 @@ internal static class RouteGenDiagnostics
     /// <summary>RG0006: a route/query/form parameter's type isn't a simple, URL-representable type.</summary>
     public static readonly DiagnosticDescriptor UnsupportedSimpleType = new(
         id: "RG0006",
-        title: "Type is not convertible to/from a URL segment, query string, or form field",
-        messageFormat: "Parameter '{0}' on method '{1}' has type '{2}', which is not a primitive, string, enum, Guid, DateTime, or similar simple type expected for a route/query/form parameter",
+        title: "Type is not convertible to/from a URL segment or query string",
+        messageFormat: "Parameter '{0}' on method '{1}' has type '{2}', which is not a primitive, string, enum, Guid, DateTime, or similar simple type expected for a route/query parameter",
         category: Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Route, query, and [Form] parameters must be simple, URL-representable types. Use [Body] for complex object types.");
+        description: "Route and query parameters must be simple, URL-representable types. [Form] has no such restriction, a complex type there is JSON-serialized into its own field instead. Use [Body] for a whole-request JSON payload.");
 
     /// <summary>RG0007: two <c>@page</c> directives would generate the same <c>Paths</c> member name.</summary>
     public static readonly DiagnosticDescriptor AmbiguousPageRouteMember = new(
@@ -112,7 +112,7 @@ internal static class RouteGenDiagnostics
     public static readonly DiagnosticDescriptor MixedBodyAndMultipart = new(
         id: "RG0009",
         title: "[Body] combined with [Form]/[File] on the same method",
-        messageFormat: "Method '{0}' has both a [Body] parameter and a [Form]/[File] parameter; a request can only have one content type -- pick JSON ([Body]) or multipart/form-data ([Form]/[File]), not both",
+        messageFormat: "Method '{0}' has both a [Body] parameter and a [Form]/[File] parameter; a request can only have one content type, pick JSON ([Body]) or multipart/form-data ([Form]/[File]), not both",
         category: Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
@@ -126,15 +126,15 @@ internal static class RouteGenDiagnostics
         category: Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "The server mirrors the client's exact declared collection type (substituting IFormFile for FormFile, or the generated controller base's own nested FileWithData<TData> for FileWithData<TData>), so only shapes ASP.NET Core's model binder is verified to construct without throwing at request time are accepted -- see TryGetFileParameterShape for the exact rule, checked against ModelBindingHelper.GetCompatibleCollection<T>.");
+        description: "The server mirrors the client's exact declared collection type (substituting IFormFile for FormFile, or the generated controller base's own nested FileWithData<TData> for FileWithData<TData>), so only shapes ASP.NET Core's model binder is verified to construct without throwing at request time are accepted, see TryGetFileParameterShape for the exact rule, checked against ModelBindingHelper.GetCompatibleCollection<T>.");
 
     /// <summary>RG0011: a custom generic collection type's constraint on its element type parameter can't be satisfied by IFormFile once mirrored server-side.</summary>
     public static readonly DiagnosticDescriptor IncompatibleFileCollectionConstraint = new(
         id: "RG0011",
         title: "[File] collection type's generic constraint is incompatible with IFormFile",
-        messageFormat: "Parameter '{0}' on method '{1}' has type '{2}', whose type parameter has {3} -- mirroring this type onto the server (substituting IFormFile for FormFile) would produce an invalid generic type",
+        messageFormat: "Parameter '{0}' on method '{1}' has type '{2}', whose type parameter has {3}, mirroring this type onto the server (substituting IFormFile for FormFile) would produce an invalid generic type",
         category: Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "The server emitter mirrors a custom [File] collection type by substituting IFormFile for FormFile as its type argument; if the collection's own generic constraint (e.g. 'where T : FormFile') can't be satisfied by the interface IFormFile, that substitution would be an invalid closed generic type. Only checked in a compilation where IFormFile itself is resolvable (the server project) -- the same interface is independently reparsed there regardless of where else it's referenced from, so the check still fires at the point it's actually decidable.");
+        description: "The server emitter mirrors a custom [File] collection type by substituting IFormFile for FormFile as its type argument; if the collection's own generic constraint (e.g. 'where T : FormFile') can't be satisfied by the interface IFormFile, that substitution would be an invalid closed generic type. Only checked in a compilation where IFormFile itself is resolvable (the server project), the same interface is independently reparsed there regardless of where else it's referenced from, so the check still fires at the point it's actually decidable.");
 }

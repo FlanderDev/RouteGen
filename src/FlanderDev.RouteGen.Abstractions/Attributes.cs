@@ -92,7 +92,7 @@ public sealed class BodyAttribute : Attribute { }
 /// Marks a scalar/simple-type parameter as one field of a <c>multipart/form-data</c> request.
 /// Combine with one or more <see cref="FileAttribute"/> parameters on the same method; a method
 /// may use <see cref="FormAttribute"/>/<see cref="FileAttribute"/> or <see cref="BodyAttribute"/>,
-/// never both -- a real HTTP request only has one content type, and RouteGen enforces that at
+/// never both, a real HTTP request only has one content type, and RouteGen enforces that at
 /// compile time (see diagnostic RG0009).
 /// Server-side this becomes <c>[FromForm]</c>; client-side it's added to the generated
 /// <c>MultipartFormDataContent</c> as a string part.
@@ -102,14 +102,14 @@ public sealed class FormAttribute : Attribute { }
 
 /// <summary>
 /// Marks a parameter as one (or, for a supported collection-typed parameter, several) uploaded
-/// file(s) in a <c>multipart/form-data</c> request -- optionally paired with per-file data via
+/// file(s) in a <c>multipart/form-data</c> request, optionally paired with per-file data via
 /// <see cref="FileWithData{TData}"/> instead of a plain <see cref="FormFile"/>.
 /// The parameter type must be <see cref="FormFile"/> or <see cref="FileWithData{TData}"/> for a
 /// single file; for multiple files it must be an array, one of <c>IEnumerable&lt;&gt;</c>/
 /// <c>ICollection&lt;&gt;</c>/<c>IList&lt;&gt;</c>/<c>IReadOnlyList&lt;&gt;</c>/
 /// <c>IReadOnlyCollection&lt;&gt;</c>/<c>List&lt;&gt;</c> of either, or another concrete generic
 /// collection type with a public parameterless constructor implementing <c>ICollection&lt;&gt;</c>
-/// (optionally nullable either way) -- see diagnostic RG0010 for any other type. This isn't an
+/// (optionally nullable either way), see diagnostic RG0010 for any other type. This isn't an
 /// arbitrary restriction: the server mirrors whichever of these shapes the client declares, and
 /// only shapes ASP.NET Core's own model binder is verified (against its source) to construct
 /// without throwing at request time are accepted.
@@ -119,7 +119,7 @@ public sealed class FormAttribute : Attribute { }
 /// collection shape the client declared for the multi-file case. A
 /// <see cref="FileWithData{TData}"/> (or a collection of them) instead becomes the generated
 /// controller base's own nested <c>FileWithData&lt;TData&gt;</c> record, reconstructed by a
-/// generated model binder from the file and its JSON-serialized data -- correlated by field name
+/// generated model binder from the file and its JSON-serialized data, correlated by field name
 /// (e.g. <c>photos[0].file</c> / <c>photos[0].data</c>), not by list position.
 /// </summary>
 [AttributeUsage(AttributeTargets.Parameter, Inherited = false, AllowMultiple = false)]
@@ -161,7 +161,7 @@ public sealed class AllowAnonymousAttribute : Attribute { }
 /// Razor component with <c>@attribute [GeneratedPathName("ModDetail")]</c> when the default
 /// derived name would be ambiguous or undesirable, or use the two-argument form to name a
 /// specific route on a component that declares more than one <c>@page</c> directive (required
-/// for every route beyond the first -- see RG0012).
+/// for every route beyond the first, see RG0012).
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = true)]
 public sealed class GeneratedPathNameAttribute : Attribute
@@ -171,7 +171,7 @@ public sealed class GeneratedPathNameAttribute : Attribute
 
     /// <summary>
     /// The exact route template text (matching a <c>@page</c> directive verbatim) this override
-    /// applies to, or null when applied via the single-argument constructor -- which only makes
+    /// applies to, or null when applied via the single-argument constructor, which only makes
     /// sense for a component's sole (or first) <c>@page</c> route, since there'd otherwise be no
     /// way to tell which of several routes it was meant to name.
 /// </summary>

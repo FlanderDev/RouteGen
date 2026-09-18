@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using SampleApp.Shared;
 
 namespace SampleApp.Server.Services;
@@ -8,7 +9,7 @@ public interface IModsService
     Task<ModDto?> GetMod(int id);
     Task<ModDto> Upload(ModUploadDto dto);
     Task<ModDto> UploadWithScreenshot(string name, string description, IFormFile screenshot);
-    Task<ModDto> UploadWithGallery(string name, string description, IReadOnlyList<ModsApiControllerBase.FileWithData<PhotoCaption>>? gallery);
+    Task<ModDto> UploadWithGallery(GalleryUploadMetadata metadata, IReadOnlyList<ModsApiControllerBase.FileWithData<PhotoCaption>>? gallery);
     Task<bool> Delete(int id);
 }
 
@@ -49,7 +50,7 @@ public sealed class InMemoryModsService : IModsService
     public Task<ModDto> UploadWithScreenshot(string name, string description, IFormFile screenshot)
     {
         // A real implementation would stream `screenshot.OpenReadStream()` to blob storage (or
-        // similar) rather than buffering it -- that's exactly the streaming behavior
+        // similar) rather than buffering it, that's exactly the streaming behavior
         // multipart/form-data enables over the base64-in-JSON workaround. The sample only needs
         // to prove the file arrived, so it just reads the length.
         var mod = new ModDto(_mods.Count + 1, name, "you", 0);
@@ -57,12 +58,13 @@ public sealed class InMemoryModsService : IModsService
         return Task.FromResult(mod);
     }
 
-    public Task<ModDto> UploadWithGallery(string name, string description, IReadOnlyList<ModsApiControllerBase.FileWithData<PhotoCaption>>? gallery)
+    public Task<ModDto> UploadWithGallery(GalleryUploadMetadata metadata, IReadOnlyList<ModsApiControllerBase.FileWithData<PhotoCaption>>? gallery)
     {
-        // Each item's own .Data (PhotoCaption) travels with its .File -- no separate parallel
+        // Each item's own .Data (PhotoCaption) travels with its .File, no separate parallel
         // list of captions to zip back up by index, and no risk of a dropped/reordered file
-        // silently pairing the wrong caption with the wrong photo.
-        var mod = new ModDto(_mods.Count + 1, name, "you", 0);
+        // silently pairing the wrong caption with the wrong photo. metadata.Name/.Description
+        // arrived as one JSON-serialized [Form] field, reconstructed by the generated binder.
+        var mod = new ModDto(_mods.Count + 1, metadata.Name, "you", 0);
         _mods.Add(mod);
         return Task.FromResult(mod);
     }

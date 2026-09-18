@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using SampleApp.Server.Services;
 using SampleApp.Shared;
@@ -21,8 +22,8 @@ public sealed class ModsController(IModsService service) : ModsApiControllerBase
     public override async Task<ActionResult<ModDto>> UploadWithScreenshot(string name, string description, IFormFile screenshot, CancellationToken ct)
         => Ok(await service.UploadWithScreenshot(name, description, screenshot));
 
-    public override async Task<ActionResult<ModDto>> UploadWithGallery(string name, string description, IReadOnlyList<FileWithData<PhotoCaption>>? gallery, CancellationToken ct)
-        => Ok(await service.UploadWithGallery(name, description, gallery));
+    public override async Task<ActionResult<ModDto>> UploadWithGallery(GalleryUploadMetadata metadata, IReadOnlyList<FileWithData<PhotoCaption>>? gallery, CancellationToken ct)
+        => Ok(await service.UploadWithGallery(metadata, gallery));
 
     public override async Task<IActionResult> Delete(int id, CancellationToken ct)
         => await service.Delete(id) ? NoContent() : NotFound();

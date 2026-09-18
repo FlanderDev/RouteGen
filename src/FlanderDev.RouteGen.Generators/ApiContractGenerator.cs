@@ -10,7 +10,7 @@ namespace FlanderDev.RouteGen.Generators;
 /// Finds every <c>[ApiRoute]</c>-decorated interface reachable from the current compilation --
 /// declared either in this project's own source, or in a referenced project/assembly (the normal
 /// case: the interface lives in a Shared project, and this generator runs in Server/Client,
-/// which only reference Shared) -- and emits:
+/// which only reference Shared), and emits:
 ///   - an abstract MVC controller base class, when the compilation references
 ///     <c>Microsoft.AspNetCore.Mvc.ControllerBase</c> (i.e. this is the ASP.NET Core server
 ///     project), or
@@ -23,7 +23,7 @@ namespace FlanderDev.RouteGen.Generators;
 /// Implementation note: this deliberately does NOT use
 /// <c>context.SyntaxProvider.ForAttributeWithMetadataName</c>. That API only enumerates syntax
 /// trees belonging to the compilation currently being built, so it would never see an interface
-/// declared in a referenced Shared project -- which is exactly the topology this package targets.
+/// declared in a referenced Shared project, which is exactly the topology this package targets.
 /// Instead this walks symbols (current compilation's assembly + every referenced assembly) via
 /// <see cref="CompilationProvider"/>, which sees referenced-project symbols regardless of where
 /// their syntax lives.
@@ -58,7 +58,7 @@ public sealed class ApiContractGenerator : IIncrementalGenerator
             CollectAttributedInterfaces(compilation.Assembly.GlobalNamespace, found, seen, ct);
             foreach (var referencedAssembly in compilation.SourceModule.ReferencedAssemblySymbols)
             {
-                // Skip framework/BCL assemblies -- they cannot contain [ApiRoute] interfaces, and
+                // Skip framework/BCL assemblies, they cannot contain [ApiRoute] interfaces, and
                 // walking their (very large) namespace trees would be pure wasted work.
                 string name = referencedAssembly.Name;
                 if (name.StartsWith("System") || name.StartsWith("Microsoft.NET") ||
@@ -107,7 +107,7 @@ public sealed class ApiContractGenerator : IIncrementalGenerator
             else if (member is INamedTypeSymbol type)
             {
                 CollectIfAttributed(type, results, seen);
-                // Interfaces can nest other types (rare, but cheap to check) -- walk them too.
+                // Interfaces can nest other types (rare, but cheap to check), walk them too.
                 foreach (var nested in type.GetTypeMembers())
                     CollectIfAttributed(nested, results, seen);
             }

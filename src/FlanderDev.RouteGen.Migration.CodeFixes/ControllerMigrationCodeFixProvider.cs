@@ -14,7 +14,7 @@ namespace FlanderDev.RouteGen.Migration;
 /// Generates a draft RouteGen interface from an attribute-routed controller (RGM0001). Supports
 /// Fix-All (document/project/solution) via <see cref="WellKnownFixAllProviders.BatchFixer"/>,
 /// which matters in practice: a real migration usually means dozens of controllers, not one.
-/// Only ever adds a new file -- see the class remarks on <see cref="ControllerMigrationModel"/>
+/// Only ever adds a new file, see the class remarks on <see cref="ControllerMigrationModel"/>
 /// and the project README for why this deliberately never touches the controller itself.
 /// </summary>
 [ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(ControllerMigrationCodeFixProvider))]
@@ -71,7 +71,7 @@ public sealed class ControllerMigrationCodeFixProvider : CodeFixProvider
     /// <summary>
     /// Finds the one other project in the solution whose name, once the segments it shares with
     /// <paramref name="currentProject"/>'s dotted name are set aside, consists of exactly one
-    /// remaining segment equal to "Shared" -- e.g. "SampleApp.Server" -> "SampleApp.Shared", or
+    /// remaining segment equal to "Shared", e.g. "SampleApp.Server" -> "SampleApp.Shared", or
     /// plain "Server" -> plain "Shared" in a solution with un-prefixed project names. Returns
     /// null if zero or more than one project matches, rather than guessing among candidates.
     /// </summary>

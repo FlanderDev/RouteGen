@@ -24,11 +24,11 @@ internal static class ClientImplementationEmitter
         bool hasNamespace = !string.IsNullOrEmpty(model.Namespace);
         if (hasNamespace)
         {
-            sb.Append("namespace ").Append(model.Namespace).AppendLine();
-            sb.AppendLine("{");
+            sb.Append("namespace ").Append(model.Namespace).AppendLine(";");
+            sb.AppendLine();
         }
 
-        string indent = hasNamespace ? "    " : "";
+        const string indent = ""; // file-scoped namespace: no extra nesting level needed
         string className = "Http" + model.ShortName + "Api";
         string fqInterface = string.IsNullOrEmpty(model.Namespace)
             ? "global::" + model.InterfaceName
@@ -46,7 +46,6 @@ internal static class ClientImplementationEmitter
 
         sb.Append(indent).AppendLine("}");
 
-        if (hasNamespace) sb.AppendLine("}");
         return sb.ToString();
     }
 
@@ -190,18 +189,37 @@ internal static class ClientImplementationEmitter
 
         foreach (var p in method.Parameters.Where(p => p.Kind == ParameterKind.Form))
         {
+            // Simple types keep going through plain (culture-invariant) ToString(); anything
+            // else is JSON-serialized into the field instead, since a complex object has no
+            // meaningful single-string form otherwise. The server mirrors this exact split --
+            // see ServerControllerEmitter.FormatParameter and EmitJsonFormFieldBinder.
+            string valueExpr;
+            if (p.IsSimpleType)
+        {
             string invariant = p.IsCultureSensitive ? "System.Globalization.CultureInfo.InvariantCulture" : "";
+                valueExpr = p.IsNullable
+                    ? p.Name + "!.ToString(" + invariant + ")!"
+                    : p.Name + ".ToString(" + invariant + ") ?? string.Empty";
+            }
+            else
+            {
+                valueExpr = "System.Text.Json.JsonSerializer.Serialize(" + (p.IsNullable ? p.Name + "!" : p.Name) + ")";
+            }
+
+            string contentExpr = p.IsSimpleType
+                ? "new StringContent(" + valueExpr + ")"
+                : "new StringContent(" + valueExpr + ", System.Text.Encoding.UTF8, \"application/json\")";
 
             if (p.IsNullable)
             {
                 sb.Append(bodyIndent).Append("if (").Append(p.Name).AppendLine(" is not null)");
-                sb.Append(bodyIndent).Append("    __content.Add(new StringContent(")
-                  .Append(p.Name).Append("!.ToString(").Append(invariant).Append(")!), \"").Append(p.Name).AppendLine("\");");
+                sb.Append(bodyIndent).Append("    __content.Add(").Append(contentExpr)
+                  .Append(", \"").Append(p.Name).AppendLine("\");");
             }
             else
             {
-                sb.Append(bodyIndent).Append("__content.Add(new StringContent(")
-                  .Append(p.Name).Append(".ToString(").Append(invariant).Append(") ?? string.Empty), \"").Append(p.Name).AppendLine("\");");
+                sb.Append(bodyIndent).Append("__content.Add(").Append(contentExpr)
+                  .Append(", \"").Append(p.Name).AppendLine("\");");
             }
         }
 
@@ -322,7 +340,7 @@ internal static class ClientImplementationEmitter
     /// <c>[File] IReadOnlyList&lt;FileWithData&lt;TData&gt;&gt;</c>-shaped parameter, correlated
     /// with the server's generated <c>FileWithDataListBinder&lt;TData&gt;</c> by index-scoped
     /// field name: <c>{name}[0].file</c>/<c>{name}[0].data</c>, <c>{name}[1].file</c>/
-    /// <c>{name}[1].data</c>, and so on -- never by list position alone, so a client bug that
+    /// <c>{name}[1].data</c>, and so on, never by list position alone, so a client bug that
     /// drops or reorders an item can't silently pair the wrong data with the wrong file.
     /// </summary>
     private static void EmitMultiFileWithDataPart(StringBuilder sb, string bodyIndent, ApiParameterModel p)
@@ -431,7 +449,7 @@ internal static class ClientImplementationEmitter
         {
             // AssignCancellationTokenDefault (in ApiInterfaceReader) already decided whether this
             // can safely get a default without pushing a later required parameter into an
-            // invalid "required after optional" position (CS1737) -- respect that decision
+            // invalid "required after optional" position (CS1737), respect that decision
             // exactly, the same as every other parameter kind, instead of forcing one here.
             string ctDefault = p.HasDefaultValue ? " = " + p.DefaultValueLiteral : "";
             return "CancellationToken " + p.Name + ctDefault;

@@ -106,8 +106,18 @@ Task<ModDto> UploadWithGallery(
 public sealed record PhotoCaption(string Caption, int SortOrder);
 ```
 
-- `[Form]` parameters must be simple types (same rule as `[Query]`) and become `[FromForm]`
-  server-side / a `StringContent` part client-side.
+- `[Form]` parameters can be any type. A simple type (same rule `[Query]` uses — primitives,
+  string, enum, Guid, DateTime, etc.) becomes `[FromForm]` server-side / a plain `StringContent`
+  part client-side, unchanged. Anything else is JSON-serialized into the one field instead —
+  server-side via a small generated model binder (nested in the controller base, emitted only
+  when a method actually needs it) that reads the raw field and deserializes it, since a complex
+  object has no meaningful single-string form the way a primitive does. `[Required]`/other
+  `DataAnnotations` on the complex type keep working exactly as before: ASP.NET Core runs model
+  validation as a step *after* binding completes, regardless of which model binder produced the
+  value. This is a deliberate choice over mirroring ASP.NET Core's per-property complex-form
+  binding (`field.PropertyName` for each property): that shape doesn't have an equivalent single
+  declared parameter type to generate a matching client for, the way `[File]`'s mirrored
+  collection type does.
 - `[File]` parameters must be `FormFile` or `FileWithData<TData>` (single file), or — for
   multiple files — one of: an array, `List<>`, `IEnumerable<>`, `ICollection<>`, `IList<>`,
   `IReadOnlyList<>`, `IReadOnlyCollection<>` (of either), or another concrete generic collection

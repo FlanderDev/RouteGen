@@ -25,7 +25,7 @@ internal sealed class ControllerMigrationModel(string @namespace, string control
 
     /// <summary>
     /// Simple names of types referenced by the interface that are declared in the same assembly
-    /// as the controller -- i.e. likely private to the Server project today, and will need to
+    /// as the controller, i.e. likely private to the Server project today, and will need to
     /// move to Shared too before the generated interface can compile there.
     /// </summary>
     public List<string> LocalTypeNames { get; } = [];
@@ -72,7 +72,7 @@ internal sealed class ActionMigrationModel(string name, string verb, string? rou
 
     /// <summary>
     /// One line per attribute that was recognized but isn't part of RouteGen's vocabulary (e.g.
-    /// <c>[Produces]</c>, <c>[ServiceFilter]</c>) -- dropped from the generated interface, but
+    /// <c>[Produces]</c>, <c>[ServiceFilter]</c>), dropped from the generated interface, but
     /// noted with a TODO comment rather than silently discarded.
     /// </summary>
     public List<string> DroppedAttributeNotes { get; } = [];
@@ -103,7 +103,7 @@ internal enum MigratedParameterKind
 /// <summary>One successfully-mapped action parameter.</summary>
 /// <param name="name">The parameter's name.</param>
 /// <param name="typeFullName">
-/// The parameter's type as it should appear in the generated interface -- for
+/// The parameter's type as it should appear in the generated interface, for
 /// <see cref="MigratedParameterKind.File"/> this is already "FormFile" or
 /// "IReadOnlyList&lt;FormFile&gt;", not the original IFormFile-shaped ASP.NET Core type.
 /// </param>

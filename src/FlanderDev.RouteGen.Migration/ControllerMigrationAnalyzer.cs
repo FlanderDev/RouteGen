@@ -8,9 +8,9 @@ namespace FlanderDev.RouteGen.Migration;
 /// <summary>
 /// Reports <see cref="MigrationDiagnostics.ControllerCanBeMigrated"/> (RGM0001, Info) on any
 /// attribute-routed controller with at least one migratable action, unless a type named
-/// "I{Stem}Api" already exists anywhere in the solution -- see
+/// "I{Stem}Api" already exists anywhere in the solution, see
 /// <see cref="ControllerMigrationReader"/> for the shared detection/translation logic this and
-/// the code fix (in the separate FlanderDev.RouteGen.Migration.CodeFixes assembly -- see this
+/// the code fix (in the separate FlanderDev.RouteGen.Migration.CodeFixes assembly, see this
 /// project's csproj for why) both build on.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
@@ -37,7 +37,7 @@ public sealed class ControllerMigrationAnalyzer : DiagnosticAnalyzer
         if (!ControllerMigrationReader.HasAttributeRouting(type)) return;
 
         // Full translation (not just "does anything qualify") so the analyzer and the fix agree
-        // on exactly the same set of migratable actions -- a controller whose only [Http*] action
+        // on exactly the same set of migratable actions, a controller whose only [Http*] action
         // turns out to be unsupported (e.g. returns a FileResult) should not show the diagnostic
         // at all, since there'd be nothing for the fix to actually generate.
         var model = ControllerMigrationReader.TryBuildModel(type);
