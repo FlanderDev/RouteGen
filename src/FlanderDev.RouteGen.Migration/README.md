@@ -85,7 +85,7 @@ Everything else translates directly:
 | `[FromForm]` (non-file types) | `[Form]` |
 | `IFormFile` / `IFormFileCollection` / `List<IFormFile>` / etc. | `[File] FormFile` / `[File] IReadOnlyList<FormFile>` |
 | `CancellationToken` | carried over as-is |
-| `[Authorize]`, `[AllowAnonymous]` | carried over as-is |
+| `[Authorize]`, `[AllowAnonymous]` | `[GenAuthorize]`, `[GenAllowAnonymous]` (RouteGen's own, `Gen`-prefixed to avoid colliding with ASP.NET Core's) |
 | `ActionResult<T>` / `Task<ActionResult<T>>` / `Task<T>` | `Task<T>` |
 | A `[controller]` token in `[Route]` | resolved to the class name stem (`Controller` suffix stripped) |
 | An `[action]` token in an `[Http*]` template | resolved to the action's own name (always unambiguous) |

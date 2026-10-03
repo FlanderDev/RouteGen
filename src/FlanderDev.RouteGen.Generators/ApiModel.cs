@@ -24,13 +24,13 @@ internal sealed class ApiInterfaceModel(string @namespace, string interfaceName,
     /// <summary>Name of the named <c>HttpClient</c> the generated client resolves via <c>IHttpClientFactory</c>.</summary>
     public string HttpClientName { get; set; } = "Default";
 
-    /// <summary>True when the interface itself carries an <c>[Authorize]</c> attribute, inherited by methods that don't declare their own.</summary>
+    /// <summary>True when the interface itself carries a <c>[GenAuthorize]</c> attribute, inherited by methods that don't declare their own.</summary>
     public bool InterfaceLevelAuthorize { get; set; }
 
-    /// <summary>Roles from the interface-level <c>[Authorize]</c>, if any.</summary>
+    /// <summary>Roles from the interface-level <c>[GenAuthorize]</c>, if any.</summary>
     public string? InterfaceLevelRoles { get; set; }
 
-    /// <summary>Policy from the interface-level <c>[Authorize]</c>, if any.</summary>
+    /// <summary>Policy from the interface-level <c>[GenAuthorize]</c>, if any.</summary>
     public string? InterfaceLevelPolicy { get; set; }
 
     /// <summary>Every parsed HTTP-verb-attributed method on the interface.</summary>
@@ -96,7 +96,7 @@ internal sealed class ApiMethodModel(string name, string verb, string? routeSuff
     /// <summary>Policy for the generated <c>[Authorize]</c>, if any.</summary>
     public string? Policy { get; set; }
 
-    /// <summary>True when this method carries <c>[AllowAnonymous]</c>, overriding any inherited interface-level authorization.</summary>
+    /// <summary>True when this method carries <c>[GenAllowAnonymous]</c>, overriding any inherited interface-level authorization.</summary>
     public bool AllowAnonymous { get; set; }
 
     /// <summary>Every parsed parameter on this method, including <see cref="ParameterKind.CancellationToken"/> parameters.</summary>

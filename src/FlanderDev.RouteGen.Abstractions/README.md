@@ -5,8 +5,10 @@ Attributes and runtime types for [RouteGen](https://github.com/FlanderDev/RouteG
 This package contains everything your shared project (and application code) needs to reference:
 
 - `[ApiRoute]`, `[Get]`, `[Post]`, `[Put]`, `[Delete]`, `[Patch]`
-- `[Query]`, `[Body]`, `[Route]`
-- `[Authorize]`, `[AllowAnonymous]`
+- `[Query]`, `[Body]`, `[Form]`, `[File]`, `[Route]`
+- `[GenAuthorize]`, `[GenAllowAnonymous]` (prefixed to avoid colliding with ASP.NET Core's own `[Authorize]`/`[AllowAnonymous]`)
+- `[GeneratedPathName]` (names a Razor page's generated `Paths` member)
+- `FormFile`, `FileWithData<TData>` (client-side file/paired-data types for `[File]`)
 - `ApiException` (thrown by the generated client on non-success responses)
 
 ## Quick start
@@ -28,7 +30,7 @@ public partial interface IModsApi
     Task<ModDto> GetMod(int id);
 
     [Post("upload")]
-    [Authorize]
+    [GenAuthorize]
     Task<ModDto> Upload([Body] ModUploadDto dto);
 }
 ```

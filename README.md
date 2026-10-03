@@ -50,11 +50,11 @@ public partial interface IModsApi
     Task<ModDto> GetMod(int id);
 
     [Post("upload")]
-    [Authorize]
+    [GenAuthorize]
     Task<ModDto> Upload([Body] ModUploadDto dto);
 
     [Delete("{id:int}")]
-    [Authorize(Roles = "Admin")]
+    [GenAuthorize(Roles = "Admin")]
     Task Delete(int id, CancellationToken ct = default);
 }
 ```
@@ -72,9 +72,16 @@ That’s the only place you write the routes.
 | `[Body]` | JSON request body (max one per method) |
 | `[Form]` | One `multipart/form-data` field (see below) |
 | `[File]` | One or more uploaded files, `multipart/form-data` (see below) |
-| `[Authorize]` / `[AllowAnonymous]` | Propagated to the generated controller |
+| `[GenAuthorize]` / `[GenAllowAnonymous]` | Re-emitted as the real ASP.NET Core `[Authorize]`/`[AllowAnonymous]` on the generated controller |
 
 `CancellationToken` is handled automatically and never becomes part of the URL.
+
+`[GenAuthorize]`/`[GenAllowAnonymous]` are named with a `Gen` prefix, unlike every other RouteGen
+attribute, specifically to avoid colliding with ASP.NET Core's own `[Authorize]`/`[AllowAnonymous]`
+(from `Microsoft.AspNetCore.Authorization`). Without the prefix, any file needing both — e.g. a
+Blazor page using `[Authorize]` for page-level security that's also in a project referencing
+`RouteGen.Abstractions` for any other reason — would hit an unavoidable `CS0104` ambiguous
+reference the moment both namespaces were in scope.
 
 ### File uploads
 
@@ -84,7 +91,7 @@ binding/request-building for both ends from the same declaration `[Body]` gets f
 
 ```csharp
 [Post("upload-with-screenshot")]
-[Authorize]
+[GenAuthorize]
 Task<ModDto> UploadWithScreenshot(
     [Form] string name,
     [Form] string description,
@@ -96,7 +103,7 @@ Task<ModDto> UploadWithScreenshot(
 // list to keep in sync by index. IReadOnlyList<> here; List<>, an array, and several other
 // shapes work too -- see the exact accepted list below.
 [Post("upload-with-gallery")]
-[Authorize]
+[GenAuthorize]
 Task<ModDto> UploadWithGallery(
     [Form] string name,
     [Form] string description,

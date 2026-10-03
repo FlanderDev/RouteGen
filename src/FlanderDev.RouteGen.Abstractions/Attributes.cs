@@ -140,10 +140,15 @@ public sealed class RouteAttribute(string? name = null) : Attribute
 /// <summary>
 /// Interface-level or method-level attribute controlling generated authorization requirements.
 /// Mirrors ASP.NET Core's <c>AuthorizeAttribute</c> shape closely enough for the generator to
-/// re-emit it onto the generated abstract controller base's action methods.
+/// re-emit it onto the generated abstract controller base's action methods. Named
+/// <c>GenAuthorizeAttribute</c> rather than the shorter <c>AuthorizeAttribute</c> specifically to
+/// avoid colliding with ASP.NET Core's own, a plain <c>using</c> of both
+/// <c>Microsoft.AspNetCore.Authorization</c> (routine in any Blazor project with page-level
+/// <c>[Authorize]</c>) and <c>FlanderDev.RouteGen.Abstractions</c> in the same file would
+/// otherwise be an unavoidable CS0104 ambiguous-reference error.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method | AttributeTargets.Interface, Inherited = false, AllowMultiple = true)]
-public sealed class AuthorizeAttribute : Attribute
+public sealed class GenAuthorizeAttribute : Attribute
 {
     /// <summary>A comma-separated list of roles required, if any.</summary>
     public string? Roles { get; set; }
@@ -152,9 +157,14 @@ public sealed class AuthorizeAttribute : Attribute
     public string? Policy { get; set; }
 }
 
-/// <summary>Marks a method as explicitly anonymous-accessible, overriding any interface-level <see cref="AuthorizeAttribute"/>.</summary>
+/// <summary>
+/// Marks a method as explicitly anonymous-accessible, overriding any interface-level
+/// <see cref="GenAuthorizeAttribute"/>. Named <c>GenAllowAnonymousAttribute</c> rather than the
+/// shorter <c>AllowAnonymousAttribute</c> for the same reason as <see cref="GenAuthorizeAttribute"/>
+///, avoiding a collision with ASP.NET Core's own attribute of the same short name.
+/// </summary>
 [AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
-public sealed class AllowAnonymousAttribute : Attribute { }
+public sealed class GenAllowAnonymousAttribute : Attribute { }
 
 /// <summary>
 /// Opt-in override for the page-route generator's default member-naming heuristic. Apply to a
