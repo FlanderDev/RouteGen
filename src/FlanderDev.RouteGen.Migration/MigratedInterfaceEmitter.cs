@@ -86,7 +86,7 @@ internal static class MigratedInterfaceEmitter
 
         if (action.AllowAnonymous)
         {
-            sb.Append(indent).AppendLine("[AllowAnonymous]");
+            sb.Append(indent).AppendLine("[GenAllowAnonymous]");
         }
         else if (action.HasAuthorize)
         {
@@ -123,7 +123,7 @@ internal static class MigratedInterfaceEmitter
         var args = new System.Collections.Generic.List<string>();
         if (!string.IsNullOrEmpty(roles)) args.Add($"Roles = \"{EscapeString(roles!)}\"");
         if (!string.IsNullOrEmpty(policy)) args.Add($"Policy = \"{EscapeString(policy!)}\"");
-        return args.Count == 0 ? "[Authorize]" : $"[Authorize({string.Join(", ", args)})]";
+        return args.Count == 0 ? "[GenAuthorize]" : $"[GenAuthorize({string.Join(", ", args)})]";
     }
 
     private static string EscapeString(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"");

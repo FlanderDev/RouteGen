@@ -19,13 +19,13 @@ public partial interface IModsApi
     Task<ModDto> GetMod(int id);
 
     [Post("upload")]
-    [Authorize]
+    [GenAuthorize]
     Task<ModDto> Upload([Body] ModUploadDto dto);
 
     // For a single file, attaching extra data alongside it is simple: just add more [Form]
     // fields next to the [File] parameter, no need for FileWithData<TData> here at all.
     [Post("upload-with-screenshot")]
-    [Authorize]
+    [GenAuthorize]
     Task<ModDto> UploadWithScreenshot(
         [Form] string name,
         [Form] string description,
@@ -37,14 +37,14 @@ public partial interface IModsApi
     // travels alongside the files in one call, the same way it would as a single [Body] parameter,
     // except [Body] can't be combined with [File] on the same method (RG0009).
     [Post("upload-with-gallery")]
-    [Authorize]
+    [GenAuthorize]
     Task<ModDto> UploadWithGallery(
         [Form] GalleryUploadMetadata metadata,
         [File] IReadOnlyList<FileWithData<PhotoCaption>>? gallery,
         CancellationToken ct = default);
 
     [Delete("{id:int}")]
-    [Authorize(Roles = "Admin")]
+    [GenAuthorize(Roles = "Admin")]
     Task Delete(int id, CancellationToken ct = default);
 }
 

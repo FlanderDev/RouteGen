@@ -122,7 +122,7 @@ internal static class ApiInterfaceReader
 
         var (methodAuth, roles, policy) = ReadAuthorize(method.GetAttributes());
         bool allowAnonymous = method.GetAttributes()
-            .Any(a => IsAttribute(a.AttributeClass, nameof(AllowAnonymousAttribute)));
+            .Any(a => IsAttribute(a.AttributeClass, nameof(GenAllowAnonymousAttribute)));
 
         string combinedTemplate = RouteTemplateParser.Combine(owner.BaseRoute, verbInfo.Value.Suffix);
         RouteTemplate routeTemplate = RouteTemplateParser.Parse(combinedTemplate);
@@ -514,7 +514,7 @@ internal static class ApiInterfaceReader
             }
 
             // Anything else: only safe if ASP.NET Core can actually Activator.CreateInstance it
-            // and treat it as an ICollection<T>, see the constructor/interface checks below.
+        // and treat it as an ICollection<T>, see the constructor/interface checks below.
         bool hasPublicParameterlessCtor = namedCollection.InstanceConstructors
                 .Any(c => c.Parameters.IsEmpty && c.DeclaredAccessibility == Accessibility.Public);
         bool implementsMatchingICollection = namedCollection.AllInterfaces.Any(i =>
@@ -526,7 +526,7 @@ internal static class ApiInterfaceReader
             {
                 // RG0011: even though the shape is otherwise valid, substituting IFormFile in for
                 // this custom collection's type parameter could still be an invalid closed generic
-                // type server-side (e.g. a plausible `where T : FormFile` constraint), only
+            // type server-side (e.g. a plausible `where T : FormFile` constraint), only
             // checked when IFormFile itself is resolvable (the server compilation) and only for
             // a FormFile element (see this method's own doc comment for why FileWithData<TData>
             // elements skip this check for now).
@@ -826,12 +826,12 @@ internal static class ApiInterfaceReader
         }
     }
 
-    /// <summary>Reads an <see cref="AuthorizeAttribute"/> from <paramref name="attributes"/>, if present.</summary>
+    /// <summary>Reads a <see cref="GenAuthorizeAttribute"/> from <paramref name="attributes"/>, if present.</summary>
     private static (bool authorize, string? roles, string? policy) ReadAuthorize(
         ImmutableArray<AttributeData> attributes)
     {
         var attr = attributes.FirstOrDefault(
-            a => IsAttribute(a.AttributeClass, nameof(AuthorizeAttribute)));
+            a => IsAttribute(a.AttributeClass, nameof(GenAuthorizeAttribute)));
 
         if (attr is null) return (false, null, null);
 
