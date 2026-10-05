@@ -211,6 +211,11 @@ result = await ModsApi.GetMods();
 
 Non-success responses throw `ApiException` (with `StatusCode` and `ResponseBody`).
 
+A method returning `Task<Stream>` completes as soon as the response headers arrive (the request is sent
+with `HttpCompletionOption.ResponseHeadersRead`), so the body is read as it is consumed instead of being
+buffered first, and `HttpClient.Timeout` only has to cover time-to-first-byte plus however long you
+take to read. The caller owns the returned stream and must dispose it; that releases the connection.
+
 ## Page routes
 
 From `@page "/mod/{id:int}"` RouteGen generates:

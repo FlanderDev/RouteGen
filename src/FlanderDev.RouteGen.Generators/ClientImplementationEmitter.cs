@@ -148,11 +148,29 @@ internal static class ClientImplementationEmitter
         };
         }
 
-        sb.Append(bodyIndent).Append("var __response = await ").Append(httpCall).AppendLine(";");
+        bool streamsResponse = method.IsStreamResponse && method.ResponseTypeFullName is not null;
+
+        if (streamsResponse)
+        {
+            // The convenience methods (GetAsync, PostAsync, ...) buffer the whole body before they
+            // return, which would make a Task<Stream> pointless and let HttpClient.Timeout cover the
+            // entire download. Return as soon as the headers are in instead.
+            EmitStreamingSend(sb, bodyIndent, method, bodyParam?.Name, ctArg);
+        }
+        else
+        {
+            sb.Append(bodyIndent).Append("var __response = await ").Append(httpCall).AppendLine(";");
+        }
+
         sb.Append(bodyIndent).AppendLine("if (!__response.IsSuccessStatusCode)");
         sb.Append(bodyIndent).AppendLine("{");
         sb.Append(bodyIndent).Append("    var __errorBody = await __response.Content.ReadAsStringAsync(")
           .Append(ctParam is not null ? ctArg : "").AppendLine(");");
+        if (streamsResponse)
+        {
+            // Nothing will read (and therefore release) this response's body any more.
+            sb.Append(bodyIndent).AppendLine("    __response.Dispose();");
+        }
         sb.Append(bodyIndent)
           .Append("    throw new global::")
           .Append(abstractionsNamespace)
@@ -180,6 +198,54 @@ internal static class ClientImplementationEmitter
 
         sb.Append(indent).AppendLine("}");
         sb.AppendLine();
+    }
+
+    /// <summary>
+    /// Emits the request construction and send for a method that returns <c>Task&lt;Stream&gt;</c>, using
+    /// <c>HttpCompletionOption.ResponseHeadersRead</c> so the body is streamed rather than buffered.
+    /// Mirrors the verb/content decisions of the buffered path in <see cref="EmitClientMethod"/>.
+    /// </summary>
+    private static void EmitStreamingSend(
+        StringBuilder sb,
+        string indent,
+        ApiMethodModel method,
+        string? bodyParamName,
+        string ctArg)
+    {
+        string httpMethod = method.UsesMultipart
+            ? method.Verb switch { "PUT" => "Put", "PATCH" => "Patch", _ => "Post" }
+            : method.Verb switch
+            {
+                "GET" => "Get",
+                "DELETE" => "Delete",
+                "POST" => "Post",
+                "PUT" => "Put",
+                "PATCH" => "Patch",
+                _ => "Get"
+            };
+
+        string? content = null;
+        if (method.UsesMultipart)
+            content = "__content";
+        else if (bodyParamName is not null && (httpMethod is "Post" or "Put" or "Patch"))
+            content = $"JsonContent.Create({bodyParamName})";
+
+        sb.Append(indent).Append("using var __request = new HttpRequestMessage(HttpMethod.")
+          .Append(httpMethod).Append(", __url.ToString())");
+        if (content is not null)
+        {
+            sb.AppendLine();
+            sb.Append(indent).AppendLine("{");
+            sb.Append(indent).Append("    Content = ").Append(content).AppendLine(",");
+            sb.Append(indent).AppendLine("};");
+        }
+        else
+        {
+            sb.AppendLine(";");
+        }
+
+        sb.Append(indent).Append("var __response = await _http.SendAsync(__request, HttpCompletionOption.ResponseHeadersRead, ")
+          .Append(ctArg).AppendLine(");");
     }
 
     /// <summary>Builds the <c>MultipartFormDataContent</c> and adds one part per <c>[Form]</c>/<c>[File]</c> parameter for a <see cref="ApiMethodModel.UsesMultipart"/> method.</summary>
